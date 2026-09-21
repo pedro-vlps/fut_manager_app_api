@@ -1,0 +1,107 @@
+"""Modelos SQLAlchemy e configuração dos recursos CRUD expostos pela API."""
+
+from src.configs.db_connection import get_db_session
+from src.models.base import Base
+from src.models.entities import (
+    EventPresence,
+    EventTeam,
+    EventTeamPlayer,
+    GameAction,
+    GroupMember,
+    Match,
+    MatchLineup,
+    MatchTeam,
+    PeladaEvent,
+    PeladaGroup,
+    Profile,
+)
+from src.schemas import crud as schema
+
+
+__all__ = [
+    "Base",
+    "Profile",
+    "PeladaGroup",
+    "GroupMember",
+    "PeladaEvent",
+    "EventPresence",
+    "EventTeam",
+    "EventTeamPlayer",
+    "Match",
+    "MatchTeam",
+    "MatchLineup",
+    "GameAction",
+    "CRUD_MODELS",
+]
+
+
+# Cada item segue a assinatura de Router da api-crud-generate-libary.
+# `prefix` e `tags` são usados pelo __main__ ao incluir o APIRouter gerado.
+CRUD_MODELS = [
+    {
+        "prefix": "/profiles", "tags": ["Profiles"], "model_class": Profile,
+        "standard_schema": schema.ProfileSchema, "db_session": get_db_session,
+        "request_post_schema": schema.ProfileCreateSchema,
+        "request_patch_schema": schema.ProfileUpdateSchema,
+    },
+    {
+        "prefix": "/groups", "tags": ["Groups"], "model_class": PeladaGroup,
+        "standard_schema": schema.PeladaGroupSchema, "db_session": get_db_session,
+        "request_post_schema": schema.PeladaGroupCreateSchema,
+        "request_patch_schema": schema.PeladaGroupUpdateSchema,
+    },
+    {
+        "prefix": "/group-members", "tags": ["Group members"], "model_class": GroupMember,
+        "standard_schema": schema.GroupMemberSchema, "db_session": get_db_session,
+        "request_post_schema": schema.GroupMemberCreateSchema,
+        "request_patch_schema": schema.GroupMemberUpdateSchema,
+    },
+    {
+        "prefix": "/events", "tags": ["Pelada events"], "model_class": PeladaEvent,
+        "standard_schema": schema.PeladaEventSchema, "db_session": get_db_session,
+        "request_post_schema": schema.PeladaEventCreateSchema,
+        "request_patch_schema": schema.PeladaEventUpdateSchema,
+    },
+    {
+        "prefix": "/event-presences", "tags": ["Event presences"], "model_class": EventPresence,
+        "standard_schema": schema.EventPresenceSchema, "db_session": get_db_session,
+        "request_post_schema": schema.EventPresenceCreateSchema,
+        "request_patch_schema": schema.EventPresenceUpdateSchema,
+    },
+    {
+        "prefix": "/event-teams", "tags": ["Event teams"], "model_class": EventTeam,
+        "standard_schema": schema.EventTeamSchema, "db_session": get_db_session,
+        "request_post_schema": schema.EventTeamCreateSchema,
+        "request_patch_schema": schema.EventTeamUpdateSchema,
+    },
+    {
+        "prefix": "/event-team-players", "tags": ["Event team players"], "model_class": EventTeamPlayer,
+        "standard_schema": schema.EventTeamPlayerSchema, "db_session": get_db_session,
+        "request_post_schema": schema.EventTeamPlayerCreateSchema,
+        "request_patch_schema": schema.EventTeamPlayerUpdateSchema,
+    },
+    {
+        "prefix": "/matches", "tags": ["Matches"], "model_class": Match,
+        "standard_schema": schema.MatchSchema, "db_session": get_db_session,
+        "request_post_schema": schema.MatchCreateSchema,
+        "request_patch_schema": schema.MatchUpdateSchema,
+    },
+    {
+        "prefix": "/match-teams", "tags": ["Match teams"], "model_class": MatchTeam,
+        "standard_schema": schema.MatchTeamSchema, "db_session": get_db_session,
+        "request_post_schema": schema.MatchTeamCreateSchema,
+        "request_patch_schema": schema.MatchTeamUpdateSchema,
+    },
+    {
+        "prefix": "/match-lineups", "tags": ["Match lineups"], "model_class": MatchLineup,
+        "standard_schema": schema.MatchLineupSchema, "db_session": get_db_session,
+        "request_post_schema": schema.MatchLineupCreateSchema,
+        "request_patch_schema": schema.MatchLineupUpdateSchema,
+    },
+    {
+        "prefix": "/game-actions", "tags": ["Game actions"], "model_class": GameAction,
+        "standard_schema": schema.GameActionSchema, "db_session": get_db_session,
+        "request_post_schema": schema.GameActionCreateSchema,
+        "request_patch_schema": schema.GameActionUpdateSchema,
+    },
+]
