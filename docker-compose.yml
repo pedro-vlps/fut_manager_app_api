@@ -7,3 +7,35 @@ services:
       - "8000:8000"
     volumes:
       - ./src:/app/src
+    environment:
+      FUT_MANAGER_APP_NAME: Fut Manager API
+      FUT_MANAGER_DEBUG: "false"
+      FUT_MANAGER_DATABASE_HOST: db
+      FUT_MANAGER_DATABASE_PORT: 5432
+      FUT_MANAGER_DATABASE_NAME: fut_manager
+      FUT_MANAGER_DATABASE_USER: fut_manager
+      FUT_MANAGER_DATABASE_PASSWORD: fut_manager
+      FUT_MANAGER_DATABASE_ECHO: "false"
+      FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: fut_manager
+      POSTGRES_USER: fut_manager
+      POSTGRES_PASSWORD: fut_manager
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fut_manager -d fut_manager"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
