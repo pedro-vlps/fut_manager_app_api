@@ -22,6 +22,35 @@ Para a conexão PostgreSQL, configure separadamente `FUT_MANAGER_DATABASE_HOST`,
 `PORT`, `NAME`, `USER` e `PASSWORD`. A URL assíncrona é montada internamente pela
 aplicação, sem precisar existir no arquivo de ambiente.
 
+### Ciclo de vida do evento
+
+Um evento aberto é identificado por `pelada_events.status = in_progress` e seu
+início/fim é registrado em `started_at` e `finished_at`. A fila atual é mantida em
+`event_team_queue_entries`; cada time do evento ocupa uma posição única. Uma
+partida pertence ao evento e pode apontar para `previous_match_id`, formando a
+cadeia de confrontos. Ao encerrá-la, `advancing_team_id` registra o time que segue
+na fila, inclusive quando o avanço foi escolhido após empate.
+
+Para bancos já criados antes dessa estrutura, aplique as migrations aditivas em
+`src/databases/scripts/migrations/` na ordem numérica. Bancos novos recebem as
+tabelas e colunas diretamente na inicialização da API.
+
+### Confirmações e lista de espera
+
+Cada evento tem `min_confirmed_players` e `max_confirmed_players`. A confirmação
+é mantida em `event_presences`; ao atingir o máximo, novas confirmações passam
+automaticamente a `waitlist`, com `waitlist_position`. Cancelar ou remover uma
+presença promove a primeira pessoa da espera e renumera a fila. O banco impede que
+um evento entre em andamento sem o mínimo de pessoas confirmadas.
+
+### Credenciais de perfil
+
+Perfis usam e-mail e senha; telefone não é armazenado. A API recebe `password`
+somente na criação/alteração do perfil e persiste um hash `scrypt` com salt
+aleatório em `password_hash`. Esse campo não é incluído nos schemas de resposta.
+Perfis legados recebem o marcador `RESET_REQUIRED` na migration 003 e precisam
+definir uma nova senha antes de poderem autenticar.
+
 ### Modelo do domínio
 
 ```text

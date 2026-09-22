@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel as SCBaseModel
+from pydantic import BaseModel as SCBaseModel, Field
 
 from src.models.enums import (
     EventStatus,
@@ -22,7 +22,6 @@ class ProfileSchema(SCBaseModel):
     id: Optional[UUID] = None
     name: str
     email: str
-    phone: Optional[str] = None
     avatar_url: Optional[str] = None
     is_active: bool
     created_at: Optional[datetime] = None
@@ -30,25 +29,25 @@ class ProfileSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "name": "João Silva", "email": "joao@example.com", "phone": "+5511999999999", "avatar_url": None, "is_active": True}}
+        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "name": "João Silva", "email": "joao@example.com", "avatar_url": None, "is_active": True}}
 
 
 class ProfileCreateSchema(SCBaseModel):
     name: str
     email: str
-    phone: Optional[str] = None
+    password: str = Field(min_length=8, max_length=128)
     avatar_url: Optional[str] = None
     is_active: bool = True
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"name": "João Silva", "email": "joao@example.com", "phone": "+5511999999999", "is_active": True}}
+        json_schema_extra = {"example": {"name": "João Silva", "email": "joao@example.com", "password": "senha-segura", "is_active": True}}
 
 
 class ProfileUpdateSchema(SCBaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
-    phone: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
     avatar_url: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -132,15 +131,18 @@ class PeladaEventSchema(SCBaseModel):
     scheduled_at: datetime
     registration_opens_at: Optional[datetime] = None
     registration_closes_at: Optional[datetime] = None
-    max_players: Optional[int] = None
+    min_confirmed_players: Optional[int] = None
+    max_confirmed_players: Optional[int] = None
     match_duration_minutes: Optional[int] = None
     status: EventStatus
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "group_id": "550e8400-e29b-41d4-a716-446655440001", "created_by_id": "550e8400-e29b-41d4-a716-446655440002", "title": "Pelada 21/09", "location": "Arena Central", "scheduled_at": "2026-09-21T20:00:00-03:00", "max_players": 18, "match_duration_minutes": 10, "status": "registration_open"}}
+        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "group_id": "550e8400-e29b-41d4-a716-446655440001", "created_by_id": "550e8400-e29b-41d4-a716-446655440002", "title": "Pelada 21/09", "location": "Arena Central", "scheduled_at": "2026-09-21T20:00:00-03:00", "min_confirmed_players": 12, "max_confirmed_players": 18, "match_duration_minutes": 10, "status": "registration_open"}}
 
 
 class PeladaEventCreateSchema(SCBaseModel):
@@ -151,13 +153,14 @@ class PeladaEventCreateSchema(SCBaseModel):
     scheduled_at: datetime
     registration_opens_at: Optional[datetime] = None
     registration_closes_at: Optional[datetime] = None
-    max_players: Optional[int] = None
+    min_confirmed_players: int
+    max_confirmed_players: int
     match_duration_minutes: Optional[int] = None
     status: EventStatus = EventStatus.DRAFT
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"group_id": "550e8400-e29b-41d4-a716-446655440001", "created_by_id": "550e8400-e29b-41d4-a716-446655440002", "title": "Pelada 21/09", "scheduled_at": "2026-09-21T20:00:00-03:00", "max_players": 18, "status": "registration_open"}}
+        json_schema_extra = {"example": {"group_id": "550e8400-e29b-41d4-a716-446655440001", "created_by_id": "550e8400-e29b-41d4-a716-446655440002", "title": "Pelada 21/09", "scheduled_at": "2026-09-21T20:00:00-03:00", "min_confirmed_players": 12, "max_confirmed_players": 18, "status": "registration_open"}}
 
 
 class PeladaEventUpdateSchema(SCBaseModel):
@@ -166,9 +169,12 @@ class PeladaEventUpdateSchema(SCBaseModel):
     scheduled_at: Optional[datetime] = None
     registration_opens_at: Optional[datetime] = None
     registration_closes_at: Optional[datetime] = None
-    max_players: Optional[int] = None
+    min_confirmed_players: Optional[int] = None
+    max_confirmed_players: Optional[int] = None
     match_duration_minutes: Optional[int] = None
     status: Optional[EventStatus] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -180,21 +186,20 @@ class EventPresenceSchema(SCBaseModel):
     event_id: UUID
     profile_id: UUID
     status: PresenceStatus
-    queue_position: Optional[int] = None
+    waitlist_position: Optional[int] = None
     confirmed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "event_id": "550e8400-e29b-41d4-a716-446655440001", "profile_id": "550e8400-e29b-41d4-a716-446655440002", "status": "confirmed", "queue_position": None, "confirmed_at": "2026-09-21T18:00:00-03:00"}}
+        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "event_id": "550e8400-e29b-41d4-a716-446655440001", "profile_id": "550e8400-e29b-41d4-a716-446655440002", "status": "confirmed", "waitlist_position": None, "confirmed_at": "2026-09-21T18:00:00-03:00"}}
 
 
 class EventPresenceCreateSchema(SCBaseModel):
     event_id: UUID
     profile_id: UUID
-    status: PresenceStatus = PresenceStatus.REGISTERED
-    queue_position: Optional[int] = None
+    status: PresenceStatus = PresenceStatus.CONFIRMED
     confirmed_at: Optional[datetime] = None
 
     class Config:
@@ -204,7 +209,7 @@ class EventPresenceCreateSchema(SCBaseModel):
 
 class EventPresenceUpdateSchema(SCBaseModel):
     status: Optional[PresenceStatus] = None
-    queue_position: Optional[int] = None
+    waitlist_position: Optional[int] = None
     confirmed_at: Optional[datetime] = None
 
     class Config:
@@ -278,10 +283,43 @@ class EventTeamPlayerUpdateSchema(SCBaseModel):
         json_schema_extra = {"example": {"role": "player"}}
 
 
+class EventTeamQueueEntrySchema(SCBaseModel):
+    id: Optional[UUID] = None
+    event_id: UUID
+    team_id: UUID
+    position: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "event_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "position": 1}}
+
+
+class EventTeamQueueEntryCreateSchema(SCBaseModel):
+    event_id: UUID
+    team_id: UUID
+    position: int
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {"example": {"event_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "position": 1}}
+
+
+class EventTeamQueueEntryUpdateSchema(SCBaseModel):
+    position: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {"example": {"position": 3}}
+
+
 class MatchSchema(SCBaseModel):
     id: Optional[UUID] = None
     event_id: UUID
     sequence: int
+    previous_match_id: Optional[UUID] = None
+    advancing_team_id: Optional[UUID] = None
     status: MatchStatus
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
@@ -296,6 +334,7 @@ class MatchSchema(SCBaseModel):
 class MatchCreateSchema(SCBaseModel):
     event_id: UUID
     sequence: int
+    previous_match_id: Optional[UUID] = None
     status: MatchStatus = MatchStatus.SCHEDULED
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
@@ -307,6 +346,7 @@ class MatchCreateSchema(SCBaseModel):
 
 class MatchUpdateSchema(SCBaseModel):
     sequence: Optional[int] = None
+    advancing_team_id: Optional[UUID] = None
     status: Optional[MatchStatus] = None
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None

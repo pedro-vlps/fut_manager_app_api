@@ -6,6 +6,7 @@ from src.models.entities import (
     EventPresence,
     EventTeam,
     EventTeamPlayer,
+    EventTeamQueueEntry,
     GameAction,
     GroupMember,
     Match,
@@ -27,6 +28,7 @@ __all__ = [
     "EventPresence",
     "EventTeam",
     "EventTeamPlayer",
+    "EventTeamQueueEntry",
     "Match",
     "MatchTeam",
     "MatchLineup",
@@ -79,6 +81,12 @@ CRUD_MODELS = [
         "standard_schema": schema.EventTeamPlayerSchema, "db_session": get_db_session,
         "request_post_schema": schema.EventTeamPlayerCreateSchema,
         "request_patch_schema": schema.EventTeamPlayerUpdateSchema,
+    },
+    {
+        "prefix": "/event-team-queue", "tags": ["Event team queue"], "model_class": EventTeamQueueEntry,
+        "standard_schema": schema.EventTeamQueueEntrySchema, "db_session": get_db_session,
+        "request_post_schema": schema.EventTeamQueueEntryCreateSchema,
+        "request_patch_schema": schema.EventTeamQueueEntryUpdateSchema,
     },
     {
         "prefix": "/matches", "tags": ["Matches"], "model_class": Match,

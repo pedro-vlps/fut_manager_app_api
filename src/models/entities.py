@@ -16,9 +16,11 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.helpers.passwords import hash_password, verify_password
 from src.models.base import Base, UUIDTimestampMixin
 from src.models.enums import (
     EventStatus,
@@ -37,7 +39,7 @@ class Profile(UUIDTimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    phone: Mapped[Optional[str]] = mapped_column(String(30))
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500))
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
@@ -52,6 +54,19 @@ class Profile(UUIDTimestampMixin, Base):
     )
     lineup_entries: Mapped[list[MatchLineup]] = relationship(back_populates="profile")
     game_actions: Mapped[list[GameAction]] = relationship(back_populates="player")
+
+    @property
+    def password(self) -> None:
+        """Nunca expõe a senha ou seu hash pela entidade."""
+        return None
+
+    @password.setter
+    def password(self, value: str) -> None:
+        self.password_hash = hash_password(value)
+
+    def verify_password(self, password: str) -> bool:
+        """Verifica uma tentativa de login contra o hash armazenado."""
+        return verify_password(password, self.password_hash)
 
 
 class PeladaGroup(UUIDTimestampMixin, Base):
@@ -96,7 +111,17 @@ class PeladaEvent(UUIDTimestampMixin, Base):
     __tablename__ = "pelada_events"
     __table_args__ = (
         CheckConstraint(
-            "max_players IS NULL OR max_players > 0", name="positive_max_players"
+            "max_confirmed_players IS NULL OR max_confirmed_players > 0",
+            name="positive_max_confirmed_players",
+        ),
+        CheckConstraint(
+            "min_confirmed_players IS NULL OR min_confirmed_players > 0",
+            name="positive_min_confirmed_players",
+        ),
+        CheckConstraint(
+            "min_confirmed_players IS NULL OR max_confirmed_players IS NULL "
+            "OR min_confirmed_players <= max_confirmed_players",
+            name="min_confirmed_not_greater_than_max",
         ),
         CheckConstraint(
             "match_duration_minutes IS NULL OR match_duration_minutes > 0",
@@ -122,19 +147,25 @@ class PeladaEvent(UUIDTimestampMixin, Base):
     registration_closes_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True)
     )
-    max_players: Mapped[Optional[int]] = mapped_column(Integer)
+    min_confirmed_players: Mapped[Optional[int]] = mapped_column(Integer)
+    max_confirmed_players: Mapped[Optional[int]] = mapped_column(Integer)
     match_duration_minutes: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[EventStatus] = mapped_column(
         Enum(EventStatus, name="event_status"),
         default=EventStatus.DRAFT,
         nullable=False,
     )
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     group: Mapped[PeladaGroup] = relationship(back_populates="events")
     presences: Mapped[list[EventPresence]] = relationship(
         back_populates="event", cascade="all, delete-orphan"
     )
     teams: Mapped[list[EventTeam]] = relationship(
+        back_populates="event", cascade="all, delete-orphan"
+    )
+    queue_entries: Mapped[list[EventTeamQueueEntry]] = relationship(
         back_populates="event", cascade="all, delete-orphan"
     )
     matches: Mapped[list[Match]] = relationship(
@@ -147,6 +178,19 @@ class EventPresence(UUIDTimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("event_id", "profile_id"),
         Index("ix_event_presences_event_status", "event_id", "status"),
+        Index(
+            "uq_event_presences_waitlist_position",
+            "event_id",
+            "waitlist_position",
+            unique=True,
+            postgresql_where=text(
+                "status = 'WAITLIST' AND waitlist_position IS NOT NULL"
+            ),
+        ),
+        CheckConstraint(
+            "waitlist_position IS NULL OR waitlist_position > 0",
+            name="positive_waitlist_position",
+        ),
     )
 
     event_id: Mapped[UUID] = mapped_column(
@@ -158,7 +202,7 @@ class EventPresence(UUIDTimestampMixin, Base):
         default=PresenceStatus.REGISTERED,
         nullable=False,
     )
-    queue_position: Mapped[Optional[int]] = mapped_column(Integer)
+    waitlist_position: Mapped[Optional[int]] = mapped_column(Integer)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     event: Mapped[PeladaEvent] = relationship(back_populates="presences")
@@ -179,6 +223,9 @@ class EventTeam(UUIDTimestampMixin, Base):
     event: Mapped[PeladaEvent] = relationship(back_populates="teams")
     players: Mapped[list[EventTeamPlayer]] = relationship(
         back_populates="team", cascade="all, delete-orphan"
+    )
+    queue_entry: Mapped[Optional[EventTeamQueueEntry]] = relationship(
+        back_populates="team", uselist=False, cascade="all, delete-orphan"
     )
     match_entries: Mapped[list[MatchTeam]] = relationship(back_populates="team")
 
@@ -201,14 +248,42 @@ class EventTeamPlayer(UUIDTimestampMixin, Base):
     profile: Mapped[Profile] = relationship(back_populates="team_assignments")
 
 
+class EventTeamQueueEntry(UUIDTimestampMixin, Base):
+    """Posição atual de um time na fila de confrontos de um evento em andamento."""
+
+    __tablename__ = "event_team_queue_entries"
+    __table_args__ = (
+        UniqueConstraint("event_id", "team_id", name="uq_event_team_queue_event_team"),
+        UniqueConstraint("event_id", "position", name="uq_event_team_queue_event_position"),
+        CheckConstraint("position > 0", name="positive_queue_position"),
+    )
+
+    event_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pelada_events.id", ondelete="CASCADE"), nullable=False
+    )
+    team_id: Mapped[UUID] = mapped_column(
+        ForeignKey("event_teams.id", ondelete="CASCADE"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    event: Mapped[PeladaEvent] = relationship(back_populates="queue_entries")
+    team: Mapped[EventTeam] = relationship(back_populates="queue_entry")
+
+
 class Match(UUIDTimestampMixin, Base):
     __tablename__ = "matches"
-    __table_args__ = (Index("ix_matches_event_started_at", "event_id", "started_at"),)
+    __table_args__ = (
+        UniqueConstraint("event_id", "sequence"),
+        UniqueConstraint("previous_match_id"),
+        Index("ix_matches_event_started_at", "event_id", "started_at"),
+    )
 
     event_id: Mapped[UUID] = mapped_column(
         ForeignKey("pelada_events.id", ondelete="CASCADE"), nullable=False
     )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_match_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("matches.id"))
+    advancing_team_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("event_teams.id"))
     status: Mapped[MatchStatus] = mapped_column(
         Enum(MatchStatus, name="match_status"),
         default=MatchStatus.SCHEDULED,
@@ -218,6 +293,12 @@ class Match(UUIDTimestampMixin, Base):
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     event: Mapped[PeladaEvent] = relationship(back_populates="matches")
+    previous_match: Mapped[Optional[Match]] = relationship(
+        back_populates="next_match", remote_side="Match.id"
+    )
+    next_match: Mapped[Optional[Match]] = relationship(
+        back_populates="previous_match", uselist=False
+    )
     teams: Mapped[list[MatchTeam]] = relationship(
         back_populates="match", cascade="all, delete-orphan"
     )
