@@ -5,7 +5,6 @@ from hashlib import scrypt
 from hmac import compare_digest
 from secrets import token_bytes
 
-
 _ALGORITHM = "scrypt"
 _N = 2**14
 _R = 8
@@ -48,8 +47,6 @@ def verify_password(password: str, stored_hash: str) -> bool:
             p=int(p),
             dklen=_KEY_LENGTH,
         )
-        return compare_digest(
-            computed_hash, urlsafe_b64decode(expected_hash)
-        )
+        return compare_digest(computed_hash, urlsafe_b64decode(expected_hash))
     except (TypeError, ValueError):
         return False

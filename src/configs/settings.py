@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     database_password: SecretStr
     database_echo: bool
     create_schema_on_startup: bool
+    cors_origins: list[str] = Field(default_factory=list)
 
     @field_validator("database_host", "database_name", "database_user")
     @classmethod

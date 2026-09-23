@@ -2,13 +2,18 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from api_crud_generate_libary.routers.router import Router
 
 from src.configs.settings import settings
 from src.configs.db_connection import engine
 from src.databases.scripts.create_schema import create_schema
 from src.models import CRUD_MODELS
+from src.routers.auth import router as auth_router
+from src.routers.groups import router as groups_router
+from src.routers.lifecycle import router as lifecycle_router
+from src.routers.event_write_guard import event_write_guard
 
 
 @asynccontextmanager
@@ -21,11 +26,24 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
 
 @app.get("/")
 def hello_world():
     """Retorna a mensagem inicial da API."""
     return {"message": "Hello World"}
+
+
+app.include_router(auth_router)
+app.include_router(groups_router)
+app.include_router(lifecycle_router)
 
 for crud_model in CRUD_MODELS:
     router_options = {
@@ -35,4 +53,5 @@ for crud_model in CRUD_MODELS:
         Router(**router_options).router,
         prefix=crud_model["prefix"],
         tags=crud_model["tags"],
+        dependencies=[Depends(event_write_guard(crud_model["model_class"]))],
     )

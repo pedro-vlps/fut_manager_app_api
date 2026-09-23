@@ -9,6 +9,7 @@ from src.models.entities import (
     EventTeamQueueEntry,
     GameAction,
     GroupMember,
+    GroupGuest,
     Match,
     MatchLineup,
     MatchTeam,
@@ -24,6 +25,7 @@ __all__ = [
     "Profile",
     "PeladaGroup",
     "GroupMember",
+    "GroupGuest",
     "PeladaEvent",
     "EventPresence",
     "EventTeam",
@@ -57,6 +59,12 @@ CRUD_MODELS = [
         "standard_schema": schema.GroupMemberSchema, "db_session": get_db_session,
         "request_post_schema": schema.GroupMemberCreateSchema,
         "request_patch_schema": schema.GroupMemberUpdateSchema,
+    },
+    {
+        "prefix": "/guests", "tags": ["Guests"], "model_class": GroupGuest,
+        "standard_schema": schema.GroupGuestSchema, "db_session": get_db_session,
+        "request_post_schema": schema.GroupGuestCreateSchema,
+        "request_patch_schema": schema.GroupGuestUpdateSchema,
     },
     {
         "prefix": "/events", "tags": ["Pelada events"], "model_class": PeladaEvent,

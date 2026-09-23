@@ -15,8 +15,8 @@ por migrations versionadas, nunca por `create_all`.
 As configurações são validadas por Pydantic ao iniciar. Copie `.env.example` para
 `.env` em execução local e use as variáveis `FUT_MANAGER_*`; o Docker Compose já
 fornece explicitamente todas as variáveis necessárias para comunicação entre os
-containers. Nenhuma configuração tem valor padrão: uma variável ausente impede a
-API de iniciar.
+containers. As configurações de banco são obrigatórias: uma variável ausente
+impede a API de iniciar.
 
 Para a conexão PostgreSQL, configure separadamente `FUT_MANAGER_DATABASE_HOST`,
 `PORT`, `NAME`, `USER` e `PASSWORD`. A URL assíncrona é montada internamente pela
@@ -44,6 +44,23 @@ presença promove a primeira pessoa da espera e renumera a fila. O banco impede 
 um evento entre em andamento sem o mínimo de pessoas confirmadas.
 
 ### Credenciais de perfil
+
+O app usa `POST /auth/login` com `{ "email": "...", "password": "..." }`.
+A resposta contém `access_token` e `profile`. Envie `Authorization: Bearer <token>`
+em `GET /auth/me/groups` para listar grupos criados pelo usuário ou com vínculo
+ativo. O servidor obtém o usuário pela sessão, sem aceitar um ID de perfil do cliente.
+`POST /auth/logout` revoga a sessão.
+
+Nesta versão local, as sessões ficam em memória, expiram em oito horas e são
+invalidadas quando a API reinicia. Execute com um único worker. Antes de usar
+múltiplos workers/réplicas, substitua esse armazenamento por sessões compartilhadas.
+Os endpoints CRUD existentes continuam com suas permissões anteriores; a proteção
+adicionada aqui cobre os novos endpoints de conta, não todo o CRUD da aplicação.
+
+O CORS permite o Expo Web em localhost. Para outros hosts, configure
+`FUT_MANAGER_CORS_ORIGINS` como uma lista JSON de origens permitidas.
+Os testes em `tests/test_auth.py` usam o PostgreSQL configurado e revertem todos
+os registros criados em cada teste. Execute `python -m unittest discover -s tests -v`.
 
 Perfis usam e-mail e senha; telefone não é armazenado. A API recebe `password`
 somente na criação/alteração do perfil e persiste um hash `scrypt` com salt
@@ -78,11 +95,35 @@ Profile ──< GroupMember >── PeladaGroup ──< PeladaEvent
   vitória/derrota a jogadores e calcular gols sofridos por goleiro.
 - `game_actions`: gols, gols contra, assistências e cartões de cada jogador.
 
-### Rankings
+### Área autenticada do grupo
+
+As rotas `/my-groups/{group_id}` exigem a sessão Bearer do login e validam
+que a conta é criadora do grupo ou membro ativo:
+
+- `GET /my-groups/{group_id}`: dados do grupo e próximo evento futuro com
+  inscrições abertas/encerradas, quantidade de confirmados e presença da conta.
+- `POST /my-groups/{group_id}/events/{event_id}/confirm`: confirma o usuário da
+  sessão. Exige vínculo ativo, prazo aberto e evento futuro; lotação esgotada
+  gera espera. Repetir a chamada mantém a mesma presença. O evento é bloqueado
+  durante a transação para serializar confirmações.
+- `GET /my-groups/{group_id}/events/{event_id}/confirmed`: nomes confirmados,
+  incluindo convidados, sem misturar a lista de espera.
+- `GET /my-groups/{group_id}/history`: somente eventos finalizados/cancelados,
+  em ordem decrescente de data. Eventos abertos com horário passado continuam
+  na área do evento atual, e não no histórico.
+- `GET /my-groups/{group_id}/members`: membros ativos e organizador, sem e-mails.
+- `GET /my-groups/{group_id}/rankings`: estatísticas de partidas finalizadas do
+  grupo, excluindo eventos cancelados e separando perfis de convidados.
+
+As datas são enviadas com fuso e exibidas no horário local do aparelho.
+Testes adicionais: `tests/test_groups.py`, com rollback dos dados de cada caso.
+
+### Cálculo dos rankings
 
 Os rankings não são armazenados como contadores em `profiles`: são agregados por
-grupo a partir dos jogos finalizados. Assim, uma correção em uma súmula sempre se
-reflete no ranking, sem risco de totais duplicados.
+grupo a partir dos jogos finalizados, sem duplicar totais. Correções de lances
+ficam disponíveis durante a partida. Após encerrar o evento, seus registros são
+somente para consulta, inclusive pelas rotas CRUD genéricas.
 
 | Ranking | Fonte |
 | --- | --- |
@@ -97,3 +138,65 @@ As rotas/serviços deverão validar as regras que atravessam tabelas: somente me
 ativo do grupo pode se inscrever; só inscrito confirmado pode ser escalado; um
 jogador não pode entrar em dois times no mesmo evento; e os dois times de uma
 partida devem pertencer ao próprio evento.
+
+## Convidados
+
+`group_guests` permite que um membro ativo do grupo registre um convidado apenas
+com nome. Para incluí-lo em um evento, crie uma `event_presence` com `guest_id`.
+O banco ordena a espera com perfis antes de convidados: um convidado sempre fica
+no fim, e uma nova confirmação de perfil passa à frente dele.
+
+## Ciclo do evento
+
+A área `/my-groups/{group_id}/events/{event_id}/lifecycle` retorna times, jogadores,
+partida atual, fila e partidas finalizadas. Somente organizadores/administradores
+podem executar as ações abaixo; membros ativos podem consultar.
+
+- `POST /teams`: sorteio balanceado ou montagem manual de 3 ou 4 times, com todos
+  os confirmados exatamente uma vez. Administradores e donos podem ajustar antes de iniciar o evento. O início exige a formação completa salva.
+- `POST /start`: inicia com o mínimo configurado de confirmados e encerra inscrições.
+- `POST /kickoff`: sorteia ou escolhe os dois times iniciais; os demais ficam na fila.
+- `POST /matches/{match_id}/timer`: recebe `action: play` ou `action: pause`.
+  O cronômetro persiste no banco, começa em zero e pausado em cada partida e
+  preserva o tempo acumulado ao continuar. Finalizar a partida congela seu tempo.
+  Em bancos existentes, aplique `src/databases/scripts/migrations/005_match_timer.sql`.
+- `POST /matches/{match_id}/actions`: registra gol, assistência, cartões ou gol contra.
+  Um UUID por lançamento evita duplicidade em repetição da mesma operação.
+- `POST /matches/{match_id}/actions/{action_id}/remove`: corrige um lance e o placar
+  enquanto a partida está em andamento.
+- `POST /matches/{match_id}/finish`: valida o vencedor pelo placar; em empate,
+  escolhe/sorteia quem avança, preservando o resultado de empate nos rankings.
+  O vencedor permanece, o primeiro da fila entra e o perdedor vai para o fim.
+  A próxima partida é criada na mesma transação. `continue_cycle=false` encerra
+  o evento ao concluir a partida.
+- `POST /finish`: encerra um evento iniciado que não tem partida em andamento.
+
+Todas as mutações do ciclo bloqueiam a linha do evento durante a transação.
+Eventos finalizados/cancelados recusam escritas com HTTP 409, inclusive inclusões
+em lote, alterações e exclusões pelo CRUD dos eventos e registros relacionados.
+As telas abertas pelo histórico são sempre de consulta.
+
+## Modalidades e posições do perfil
+
+`GET /auth/modalities` fornece o catálogo de Futebol de Campo, Futsal e Fut7.
+`POST /auth/register` cria uma conta; o CRUD `/profiles` usa a mesma validação
+do campo obrigatório `positions`, por exemplo:
+`{"campo":["volante","meia"],"futsal":["fixo","pivo"]}`.
+Cada modalidade informada exige uma ou mais posições válidas, sem repetição.
+O PATCH permite omitir o campo, mas não apagá-lo com `null` ou `{}`.
+O login devolve as posições cadastradas. Para bancos existentes, aplique a
+migration `006_profile_positions.sql`; perfis antigos permanecem com `{}` até
+informarem suas preferências, sem atribuição automática de posições.
+
+Referências do catálogo (funções táticas, cujos nomes podem variar por equipe):
+- Campo: https://www.santosfc.com.br/masculino/
+- Futsal: https://cdn.conmebol.com/wp-content/uploads/2024/02/Manual-Futsal-Port-Web.pdf
+- Fut7: https://www.cbf7.com.br/federacao/FUT7SE/equipes/bola-de-ouro-esporte-clube
+
+## Dados fictícios para teste
+
+`scripts/seed_demo.py` popula um grupo existente de forma idempotente. A senha é
+lida de `FUT_MANAGER_DEMO_PASSWORD`; não é necessário editar o script.
+Use `--group-id UUID --saturday 2026-09-26 --start-now` para criar três eventos
+históricos e um evento atual com seis confirmados. O script preserva registros
+existentes e não reinicia um evento que o usuário já começou a testar.
