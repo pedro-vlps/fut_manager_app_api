@@ -19,6 +19,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
 
 from src.helpers.passwords import hash_password, verify_password
 from src.models.base import Base, UUIDTimestampMixin
@@ -41,11 +42,15 @@ class Profile(UUIDTimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500))
+    positions: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb"), nullable=False
+    )
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     group_memberships: Mapped[list[GroupMember]] = relationship(
         back_populates="profile"
     )
+    created_guests: Mapped[list[GroupGuest]] = relationship(back_populates="created_by")
     event_presences: Mapped[list[EventPresence]] = relationship(
         back_populates="profile"
     )
@@ -81,6 +86,9 @@ class PeladaGroup(UUIDTimestampMixin, Base):
     members: Mapped[list[GroupMember]] = relationship(
         back_populates="group", cascade="all, delete-orphan"
     )
+    guests: Mapped[list[GroupGuest]] = relationship(
+        back_populates="group", cascade="all, delete-orphan"
+    )
     events: Mapped[list[PeladaEvent]] = relationship(
         back_populates="group", cascade="all, delete-orphan"
     )
@@ -105,6 +113,29 @@ class GroupMember(UUIDTimestampMixin, Base):
 
     group: Mapped[PeladaGroup] = relationship(back_populates="members")
     profile: Mapped[Profile] = relationship(back_populates="group_memberships")
+
+
+class GroupGuest(UUIDTimestampMixin, Base):
+    """Jogador convidado, sem conta, incluído por um membro ativo da pelada."""
+
+    __tablename__ = "group_guests"
+
+    group_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pelada_groups.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by_id: Mapped[UUID] = mapped_column(
+        ForeignKey("profiles.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    group: Mapped[PeladaGroup] = relationship(back_populates="guests")
+    created_by: Mapped[Profile] = relationship(back_populates="created_guests")
+    event_presences: Mapped[list[EventPresence]] = relationship(back_populates="guest")
+    team_assignments: Mapped[list[EventTeamPlayer]] = relationship(
+        back_populates="guest"
+    )
+    lineup_entries: Mapped[list[MatchLineup]] = relationship(back_populates="guest")
+    game_actions: Mapped[list[GameAction]] = relationship(back_populates="guest")
 
 
 class PeladaEvent(UUIDTimestampMixin, Base):
@@ -176,7 +207,8 @@ class PeladaEvent(UUIDTimestampMixin, Base):
 class EventPresence(UUIDTimestampMixin, Base):
     __tablename__ = "event_presences"
     __table_args__ = (
-        UniqueConstraint("event_id", "profile_id"),
+        UniqueConstraint("event_id", "profile_id", name="uq_event_presence_profile"),
+        UniqueConstraint("event_id", "guest_id", name="uq_event_presence_guest"),
         Index("ix_event_presences_event_status", "event_id", "status"),
         Index(
             "uq_event_presences_waitlist_position",
@@ -191,12 +223,20 @@ class EventPresence(UUIDTimestampMixin, Base):
             "waitlist_position IS NULL OR waitlist_position > 0",
             name="positive_waitlist_position",
         ),
+        CheckConstraint(
+            "(profile_id IS NOT NULL AND guest_id IS NULL) OR "
+            "(profile_id IS NULL AND guest_id IS NOT NULL)",
+            name="profile_or_guest_presence",
+        ),
     )
 
     event_id: Mapped[UUID] = mapped_column(
         ForeignKey("pelada_events.id", ondelete="CASCADE"), nullable=False
     )
-    profile_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    profile_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("profiles.id"))
+    guest_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("group_guests.id", ondelete="CASCADE")
+    )
     status: Mapped[PresenceStatus] = mapped_column(
         Enum(PresenceStatus, name="presence_status"),
         default=PresenceStatus.REGISTERED,
@@ -207,6 +247,7 @@ class EventPresence(UUIDTimestampMixin, Base):
 
     event: Mapped[PeladaEvent] = relationship(back_populates="presences")
     profile: Mapped[Profile] = relationship(back_populates="event_presences")
+    guest: Mapped[Optional[GroupGuest]] = relationship(back_populates="event_presences")
 
 
 class EventTeam(UUIDTimestampMixin, Base):
@@ -232,12 +273,23 @@ class EventTeam(UUIDTimestampMixin, Base):
 
 class EventTeamPlayer(UUIDTimestampMixin, Base):
     __tablename__ = "event_team_players"
-    __table_args__ = (UniqueConstraint("team_id", "profile_id"),)
+    __table_args__ = (
+        UniqueConstraint("team_id", "profile_id", name="uq_event_team_player_profile"),
+        UniqueConstraint("team_id", "guest_id", name="uq_event_team_player_guest"),
+        CheckConstraint(
+            "(profile_id IS NOT NULL AND guest_id IS NULL) OR "
+            "(profile_id IS NULL AND guest_id IS NOT NULL)",
+            name="profile_or_guest_team_player",
+        ),
+    )
 
     team_id: Mapped[UUID] = mapped_column(
         ForeignKey("event_teams.id", ondelete="CASCADE"), nullable=False
     )
-    profile_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    profile_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("profiles.id"))
+    guest_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("group_guests.id", ondelete="CASCADE")
+    )
     role: Mapped[TeamPlayerRole] = mapped_column(
         Enum(TeamPlayerRole, name="team_player_role"),
         default=TeamPlayerRole.PLAYER,
@@ -246,6 +298,9 @@ class EventTeamPlayer(UUIDTimestampMixin, Base):
 
     team: Mapped[EventTeam] = relationship(back_populates="players")
     profile: Mapped[Profile] = relationship(back_populates="team_assignments")
+    guest: Mapped[Optional[GroupGuest]] = relationship(
+        back_populates="team_assignments"
+    )
 
 
 class EventTeamQueueEntry(UUIDTimestampMixin, Base):
@@ -254,7 +309,9 @@ class EventTeamQueueEntry(UUIDTimestampMixin, Base):
     __tablename__ = "event_team_queue_entries"
     __table_args__ = (
         UniqueConstraint("event_id", "team_id", name="uq_event_team_queue_event_team"),
-        UniqueConstraint("event_id", "position", name="uq_event_team_queue_event_position"),
+        UniqueConstraint(
+            "event_id", "position", name="uq_event_team_queue_event_position"
+        ),
         CheckConstraint("position > 0", name="positive_queue_position"),
     )
 
@@ -283,7 +340,9 @@ class Match(UUIDTimestampMixin, Base):
     )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     previous_match_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("matches.id"))
-    advancing_team_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("event_teams.id"))
+    advancing_team_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("event_teams.id")
+    )
     status: Mapped[MatchStatus] = mapped_column(
         Enum(MatchStatus, name="match_status"),
         default=MatchStatus.SCHEDULED,
@@ -291,6 +350,12 @@ class Match(UUIDTimestampMixin, Base):
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    timer_elapsed_ms: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0"), nullable=False
+    )
+    timer_running_since: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     event: Mapped[PeladaEvent] = relationship(back_populates="matches")
     previous_match: Mapped[Optional[Match]] = relationship(
@@ -333,13 +398,24 @@ class MatchLineup(UUIDTimestampMixin, Base):
     """Quem efetivamente jogou a partida, inclusive o goleiro para gols sofridos."""
 
     __tablename__ = "match_lineups"
-    __table_args__ = (UniqueConstraint("match_id", "profile_id"),)
+    __table_args__ = (
+        UniqueConstraint("match_id", "profile_id", name="uq_match_lineup_profile"),
+        UniqueConstraint("match_id", "guest_id", name="uq_match_lineup_guest"),
+        CheckConstraint(
+            "(profile_id IS NOT NULL AND guest_id IS NULL) OR "
+            "(profile_id IS NULL AND guest_id IS NOT NULL)",
+            name="profile_or_guest_match_lineup",
+        ),
+    )
 
     match_id: Mapped[UUID] = mapped_column(
         ForeignKey("matches.id", ondelete="CASCADE"), nullable=False
     )
     team_id: Mapped[UUID] = mapped_column(ForeignKey("event_teams.id"), nullable=False)
-    profile_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    profile_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("profiles.id"))
+    guest_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("group_guests.id", ondelete="CASCADE")
+    )
     role: Mapped[TeamPlayerRole] = mapped_column(
         Enum(TeamPlayerRole, name="lineup_player_role"),
         default=TeamPlayerRole.PLAYER,
@@ -348,19 +424,30 @@ class MatchLineup(UUIDTimestampMixin, Base):
 
     match: Mapped[Match] = relationship(back_populates="lineups")
     profile: Mapped[Profile] = relationship(back_populates="lineup_entries")
+    guest: Mapped[Optional[GroupGuest]] = relationship(back_populates="lineup_entries")
 
 
 class GameAction(UUIDTimestampMixin, Base):
     """Ocorrência individual durante o jogo; rankings são agregados desta tabela."""
 
     __tablename__ = "game_actions"
-    __table_args__ = (Index("ix_game_actions_match_type", "match_id", "action_type"),)
+    __table_args__ = (
+        Index("ix_game_actions_match_type", "match_id", "action_type"),
+        CheckConstraint(
+            "(player_id IS NOT NULL AND guest_id IS NULL) OR "
+            "(player_id IS NULL AND guest_id IS NOT NULL)",
+            name="profile_or_guest_game_action",
+        ),
+    )
 
     match_id: Mapped[UUID] = mapped_column(
         ForeignKey("matches.id", ondelete="CASCADE"), nullable=False
     )
     team_id: Mapped[UUID] = mapped_column(ForeignKey("event_teams.id"), nullable=False)
-    player_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    player_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("profiles.id"))
+    guest_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("group_guests.id", ondelete="CASCADE")
+    )
     action_type: Mapped[GameActionType] = mapped_column(
         Enum(GameActionType, name="game_action_type"), nullable=False
     )
@@ -370,3 +457,4 @@ class GameAction(UUIDTimestampMixin, Base):
 
     match: Mapped[Match] = relationship(back_populates="actions")
     player: Mapped[Profile] = relationship(back_populates="game_actions")
+    guest: Mapped[Optional[GroupGuest]] = relationship(back_populates="game_actions")

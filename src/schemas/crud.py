@@ -4,7 +4,9 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel as SCBaseModel, Field
+from pydantic import BaseModel as SCBaseModel, Field, model_validator, field_validator
+from src.schemas.player_positions import PlayerPositions
+from pydantic_core import PydanticCustomError
 
 from src.models.enums import (
     EventStatus,
@@ -19,6 +21,7 @@ from src.models.enums import (
 
 
 class ProfileSchema(SCBaseModel):
+    positions: dict[str, list[str]] = Field(default_factory=dict)
     id: Optional[UUID] = None
     name: str
     email: str
@@ -29,10 +32,19 @@ class ProfileSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "name": "João Silva", "email": "joao@example.com", "avatar_url": None, "is_active": True}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "name": "João Silva",
+                "email": "joao@example.com",
+                "avatar_url": None,
+                "is_active": True,
+            }
+        }
 
 
 class ProfileCreateSchema(SCBaseModel):
+    positions: PlayerPositions
     name: str
     email: str
     password: str = Field(min_length=8, max_length=128)
@@ -41,10 +53,30 @@ class ProfileCreateSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"name": "João Silva", "email": "joao@example.com", "password": "senha-segura", "is_active": True}}
+        json_schema_extra = {
+            "example": {
+                "name": "João Silva",
+                "email": "joao@example.com",
+                "password": "senha-segura",
+                "positions": {"campo": ["volante", "meia"], "futsal": ["ala_direita"]},
+                "is_active": True,
+            }
+        }
 
 
 class ProfileUpdateSchema(SCBaseModel):
+    positions: Optional[PlayerPositions] = None
+
+    @field_validator("positions")
+    @classmethod
+    def positions_not_null(cls, value):
+        if value is None:
+            raise PydanticCustomError(
+                "positions_required",
+                "As posições não podem ser removidas. Escolha pelo menos uma.",
+            )
+        return value
+
     name: Optional[str] = None
     email: Optional[str] = None
     password: Optional[str] = Field(default=None, min_length=8, max_length=128)
@@ -66,7 +98,14 @@ class PeladaGroupSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "name": "Pelada de Domingo", "description": "Jogo semanal", "created_by_id": "550e8400-e29b-41d4-a716-446655440001"}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "name": "Pelada de Domingo",
+                "description": "Jogo semanal",
+                "created_by_id": "550e8400-e29b-41d4-a716-446655440001",
+            }
+        }
 
 
 class PeladaGroupCreateSchema(SCBaseModel):
@@ -76,7 +115,13 @@ class PeladaGroupCreateSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"name": "Pelada de Domingo", "description": "Jogo semanal", "created_by_id": "550e8400-e29b-41d4-a716-446655440001"}}
+        json_schema_extra = {
+            "example": {
+                "name": "Pelada de Domingo",
+                "description": "Jogo semanal",
+                "created_by_id": "550e8400-e29b-41d4-a716-446655440001",
+            }
+        }
 
 
 class PeladaGroupUpdateSchema(SCBaseModel):
@@ -99,7 +144,15 @@ class GroupMemberSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "group_id": "550e8400-e29b-41d4-a716-446655440001", "profile_id": "550e8400-e29b-41d4-a716-446655440002", "role": "member", "status": "active"}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "group_id": "550e8400-e29b-41d4-a716-446655440001",
+                "profile_id": "550e8400-e29b-41d4-a716-446655440002",
+                "role": "member",
+                "status": "active",
+            }
+        }
 
 
 class GroupMemberCreateSchema(SCBaseModel):
@@ -110,7 +163,14 @@ class GroupMemberCreateSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"group_id": "550e8400-e29b-41d4-a716-446655440001", "profile_id": "550e8400-e29b-41d4-a716-446655440002", "role": "member", "status": "active"}}
+        json_schema_extra = {
+            "example": {
+                "group_id": "550e8400-e29b-41d4-a716-446655440001",
+                "profile_id": "550e8400-e29b-41d4-a716-446655440002",
+                "role": "member",
+                "status": "active",
+            }
+        }
 
 
 class GroupMemberUpdateSchema(SCBaseModel):
@@ -120,6 +180,50 @@ class GroupMemberUpdateSchema(SCBaseModel):
     class Config:
         from_attributes = True
         json_schema_extra = {"example": {"role": "admin"}}
+
+
+class GroupGuestSchema(SCBaseModel):
+    id: Optional[UUID] = None
+    group_id: UUID
+    created_by_id: UUID
+    name: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "group_id": "550e8400-e29b-41d4-a716-446655440001",
+                "created_by_id": "550e8400-e29b-41d4-a716-446655440002",
+                "name": "Carlos Convidado",
+            }
+        }
+
+
+class GroupGuestCreateSchema(SCBaseModel):
+    group_id: UUID
+    created_by_id: UUID
+    name: str
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "group_id": "550e8400-e29b-41d4-a716-446655440001",
+                "created_by_id": "550e8400-e29b-41d4-a716-446655440002",
+                "name": "Carlos Convidado",
+            }
+        }
+
+
+class GroupGuestUpdateSchema(SCBaseModel):
+    name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {"example": {"name": "Carlos"}}
 
 
 class PeladaEventSchema(SCBaseModel):
@@ -142,7 +246,20 @@ class PeladaEventSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "group_id": "550e8400-e29b-41d4-a716-446655440001", "created_by_id": "550e8400-e29b-41d4-a716-446655440002", "title": "Pelada 21/09", "location": "Arena Central", "scheduled_at": "2026-09-21T20:00:00-03:00", "min_confirmed_players": 12, "max_confirmed_players": 18, "match_duration_minutes": 10, "status": "registration_open"}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "group_id": "550e8400-e29b-41d4-a716-446655440001",
+                "created_by_id": "550e8400-e29b-41d4-a716-446655440002",
+                "title": "Pelada 21/09",
+                "location": "Arena Central",
+                "scheduled_at": "2026-09-21T20:00:00-03:00",
+                "min_confirmed_players": 12,
+                "max_confirmed_players": 18,
+                "match_duration_minutes": 10,
+                "status": "registration_open",
+            }
+        }
 
 
 class PeladaEventCreateSchema(SCBaseModel):
@@ -160,7 +277,17 @@ class PeladaEventCreateSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"group_id": "550e8400-e29b-41d4-a716-446655440001", "created_by_id": "550e8400-e29b-41d4-a716-446655440002", "title": "Pelada 21/09", "scheduled_at": "2026-09-21T20:00:00-03:00", "min_confirmed_players": 12, "max_confirmed_players": 18, "status": "registration_open"}}
+        json_schema_extra = {
+            "example": {
+                "group_id": "550e8400-e29b-41d4-a716-446655440001",
+                "created_by_id": "550e8400-e29b-41d4-a716-446655440002",
+                "title": "Pelada 21/09",
+                "scheduled_at": "2026-09-21T20:00:00-03:00",
+                "min_confirmed_players": 12,
+                "max_confirmed_players": 18,
+                "status": "registration_open",
+            }
+        }
 
 
 class PeladaEventUpdateSchema(SCBaseModel):
@@ -184,7 +311,8 @@ class PeladaEventUpdateSchema(SCBaseModel):
 class EventPresenceSchema(SCBaseModel):
     id: Optional[UUID] = None
     event_id: UUID
-    profile_id: UUID
+    profile_id: Optional[UUID] = None
+    guest_id: Optional[UUID] = None
     status: PresenceStatus
     waitlist_position: Optional[int] = None
     confirmed_at: Optional[datetime] = None
@@ -193,18 +321,40 @@ class EventPresenceSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "event_id": "550e8400-e29b-41d4-a716-446655440001", "profile_id": "550e8400-e29b-41d4-a716-446655440002", "status": "confirmed", "waitlist_position": None, "confirmed_at": "2026-09-21T18:00:00-03:00"}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "event_id": "550e8400-e29b-41d4-a716-446655440001",
+                "profile_id": "550e8400-e29b-41d4-a716-446655440002",
+                "status": "confirmed",
+                "waitlist_position": None,
+                "confirmed_at": "2026-09-21T18:00:00-03:00",
+            }
+        }
 
 
 class EventPresenceCreateSchema(SCBaseModel):
     event_id: UUID
-    profile_id: UUID
+    profile_id: Optional[UUID] = None
+    guest_id: Optional[UUID] = None
     status: PresenceStatus = PresenceStatus.CONFIRMED
     confirmed_at: Optional[datetime] = None
 
+    @model_validator(mode="after")
+    def validate_player_reference(self) -> "EventPresenceCreateSchema":
+        if (self.profile_id is None) == (self.guest_id is None):
+            raise ValueError("Informe exatamente um profile_id ou guest_id.")
+        return self
+
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"event_id": "550e8400-e29b-41d4-a716-446655440001", "profile_id": "550e8400-e29b-41d4-a716-446655440002", "status": "registered"}}
+        json_schema_extra = {
+            "example": {
+                "event_id": "550e8400-e29b-41d4-a716-446655440001",
+                "profile_id": "550e8400-e29b-41d4-a716-446655440002",
+                "status": "confirmed",
+            }
+        }
 
 
 class EventPresenceUpdateSchema(SCBaseModel):
@@ -228,7 +378,15 @@ class EventTeamSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "event_id": "550e8400-e29b-41d4-a716-446655440001", "name": "Time Azul", "color": "#2563EB", "draw_order": 1}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "event_id": "550e8400-e29b-41d4-a716-446655440001",
+                "name": "Time Azul",
+                "color": "#2563EB",
+                "draw_order": 1,
+            }
+        }
 
 
 class EventTeamCreateSchema(SCBaseModel):
@@ -239,7 +397,14 @@ class EventTeamCreateSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"event_id": "550e8400-e29b-41d4-a716-446655440001", "name": "Time Azul", "color": "#2563EB", "draw_order": 1}}
+        json_schema_extra = {
+            "example": {
+                "event_id": "550e8400-e29b-41d4-a716-446655440001",
+                "name": "Time Azul",
+                "color": "#2563EB",
+                "draw_order": 1,
+            }
+        }
 
 
 class EventTeamUpdateSchema(SCBaseModel):
@@ -255,24 +420,45 @@ class EventTeamUpdateSchema(SCBaseModel):
 class EventTeamPlayerSchema(SCBaseModel):
     id: Optional[UUID] = None
     team_id: UUID
-    profile_id: UUID
+    profile_id: Optional[UUID] = None
+    guest_id: Optional[UUID] = None
     role: TeamPlayerRole
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "team_id": "550e8400-e29b-41d4-a716-446655440001", "profile_id": "550e8400-e29b-41d4-a716-446655440002", "role": "goalkeeper"}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "team_id": "550e8400-e29b-41d4-a716-446655440001",
+                "profile_id": "550e8400-e29b-41d4-a716-446655440002",
+                "role": "goalkeeper",
+            }
+        }
 
 
 class EventTeamPlayerCreateSchema(SCBaseModel):
     team_id: UUID
-    profile_id: UUID
+    profile_id: Optional[UUID] = None
+    guest_id: Optional[UUID] = None
     role: TeamPlayerRole = TeamPlayerRole.PLAYER
+
+    @model_validator(mode="after")
+    def validate_player_reference(self) -> "EventTeamPlayerCreateSchema":
+        if (self.profile_id is None) == (self.guest_id is None):
+            raise ValueError("Informe exatamente um profile_id ou guest_id.")
+        return self
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"team_id": "550e8400-e29b-41d4-a716-446655440001", "profile_id": "550e8400-e29b-41d4-a716-446655440002", "role": "goalkeeper"}}
+        json_schema_extra = {
+            "example": {
+                "team_id": "550e8400-e29b-41d4-a716-446655440001",
+                "profile_id": "550e8400-e29b-41d4-a716-446655440002",
+                "role": "goalkeeper",
+            }
+        }
 
 
 class EventTeamPlayerUpdateSchema(SCBaseModel):
@@ -293,7 +479,14 @@ class EventTeamQueueEntrySchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "event_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "position": 1}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "event_id": "550e8400-e29b-41d4-a716-446655440001",
+                "team_id": "550e8400-e29b-41d4-a716-446655440002",
+                "position": 1,
+            }
+        }
 
 
 class EventTeamQueueEntryCreateSchema(SCBaseModel):
@@ -303,7 +496,13 @@ class EventTeamQueueEntryCreateSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"event_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "position": 1}}
+        json_schema_extra = {
+            "example": {
+                "event_id": "550e8400-e29b-41d4-a716-446655440001",
+                "team_id": "550e8400-e29b-41d4-a716-446655440002",
+                "position": 1,
+            }
+        }
 
 
 class EventTeamQueueEntryUpdateSchema(SCBaseModel):
@@ -328,7 +527,16 @@ class MatchSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "event_id": "550e8400-e29b-41d4-a716-446655440001", "sequence": 1, "status": "scheduled", "started_at": None, "ended_at": None}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "event_id": "550e8400-e29b-41d4-a716-446655440001",
+                "sequence": 1,
+                "status": "scheduled",
+                "started_at": None,
+                "ended_at": None,
+            }
+        }
 
 
 class MatchCreateSchema(SCBaseModel):
@@ -341,7 +549,13 @@ class MatchCreateSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"event_id": "550e8400-e29b-41d4-a716-446655440001", "sequence": 1, "status": "scheduled"}}
+        json_schema_extra = {
+            "example": {
+                "event_id": "550e8400-e29b-41d4-a716-446655440001",
+                "sequence": 1,
+                "status": "scheduled",
+            }
+        }
 
 
 class MatchUpdateSchema(SCBaseModel):
@@ -353,7 +567,12 @@ class MatchUpdateSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"status": "in_progress", "started_at": "2026-09-21T20:00:00-03:00"}}
+        json_schema_extra = {
+            "example": {
+                "status": "in_progress",
+                "started_at": "2026-09-21T20:00:00-03:00",
+            }
+        }
 
 
 class MatchTeamSchema(SCBaseModel):
@@ -367,7 +586,15 @@ class MatchTeamSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "match_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "goals": 3, "result": "win"}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "match_id": "550e8400-e29b-41d4-a716-446655440001",
+                "team_id": "550e8400-e29b-41d4-a716-446655440002",
+                "goals": 3,
+                "result": "win",
+            }
+        }
 
 
 class MatchTeamCreateSchema(SCBaseModel):
@@ -378,7 +605,14 @@ class MatchTeamCreateSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"match_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "goals": 3, "result": "win"}}
+        json_schema_extra = {
+            "example": {
+                "match_id": "550e8400-e29b-41d4-a716-446655440001",
+                "team_id": "550e8400-e29b-41d4-a716-446655440002",
+                "goals": 3,
+                "result": "win",
+            }
+        }
 
 
 class MatchTeamUpdateSchema(SCBaseModel):
@@ -394,25 +628,48 @@ class MatchLineupSchema(SCBaseModel):
     id: Optional[UUID] = None
     match_id: UUID
     team_id: UUID
-    profile_id: UUID
+    profile_id: Optional[UUID] = None
+    guest_id: Optional[UUID] = None
     role: TeamPlayerRole
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "match_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "profile_id": "550e8400-e29b-41d4-a716-446655440003", "role": "goalkeeper"}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "match_id": "550e8400-e29b-41d4-a716-446655440001",
+                "team_id": "550e8400-e29b-41d4-a716-446655440002",
+                "profile_id": "550e8400-e29b-41d4-a716-446655440003",
+                "role": "goalkeeper",
+            }
+        }
 
 
 class MatchLineupCreateSchema(SCBaseModel):
     match_id: UUID
     team_id: UUID
-    profile_id: UUID
+    profile_id: Optional[UUID] = None
+    guest_id: Optional[UUID] = None
     role: TeamPlayerRole = TeamPlayerRole.PLAYER
+
+    @model_validator(mode="after")
+    def validate_player_reference(self) -> "MatchLineupCreateSchema":
+        if (self.profile_id is None) == (self.guest_id is None):
+            raise ValueError("Informe exatamente um profile_id ou guest_id.")
+        return self
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"match_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "profile_id": "550e8400-e29b-41d4-a716-446655440003", "role": "goalkeeper"}}
+        json_schema_extra = {
+            "example": {
+                "match_id": "550e8400-e29b-41d4-a716-446655440001",
+                "team_id": "550e8400-e29b-41d4-a716-446655440002",
+                "profile_id": "550e8400-e29b-41d4-a716-446655440003",
+                "role": "goalkeeper",
+            }
+        }
 
 
 class MatchLineupUpdateSchema(SCBaseModel):
@@ -427,7 +684,8 @@ class GameActionSchema(SCBaseModel):
     id: Optional[UUID] = None
     match_id: UUID
     team_id: UUID
-    player_id: UUID
+    player_id: Optional[UUID] = None
+    guest_id: Optional[UUID] = None
     action_type: GameActionType
     occurred_at: Optional[datetime] = None
     minute: Optional[int] = None
@@ -437,21 +695,46 @@ class GameActionSchema(SCBaseModel):
 
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"id": "550e8400-e29b-41d4-a716-446655440000", "match_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "player_id": "550e8400-e29b-41d4-a716-446655440003", "action_type": "goal", "minute": 7, "notes": None}}
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "match_id": "550e8400-e29b-41d4-a716-446655440001",
+                "team_id": "550e8400-e29b-41d4-a716-446655440002",
+                "player_id": "550e8400-e29b-41d4-a716-446655440003",
+                "action_type": "goal",
+                "minute": 7,
+                "notes": None,
+            }
+        }
 
 
 class GameActionCreateSchema(SCBaseModel):
     match_id: UUID
     team_id: UUID
-    player_id: UUID
+    player_id: Optional[UUID] = None
+    guest_id: Optional[UUID] = None
     action_type: GameActionType
     occurred_at: Optional[datetime] = None
     minute: Optional[int] = None
     notes: Optional[str] = None
 
+    @model_validator(mode="after")
+    def validate_player_reference(self) -> "GameActionCreateSchema":
+        if (self.player_id is None) == (self.guest_id is None):
+            raise ValueError("Informe exatamente um player_id ou guest_id.")
+        return self
+
     class Config:
         from_attributes = True
-        json_schema_extra = {"example": {"match_id": "550e8400-e29b-41d4-a716-446655440001", "team_id": "550e8400-e29b-41d4-a716-446655440002", "player_id": "550e8400-e29b-41d4-a716-446655440003", "action_type": "goal", "minute": 7}}
+        json_schema_extra = {
+            "example": {
+                "match_id": "550e8400-e29b-41d4-a716-446655440001",
+                "team_id": "550e8400-e29b-41d4-a716-446655440002",
+                "player_id": "550e8400-e29b-41d4-a716-446655440003",
+                "action_type": "goal",
+                "minute": 7,
+            }
+        }
 
 
 class GameActionUpdateSchema(SCBaseModel):
