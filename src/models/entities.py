@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    FetchedValue,
     Index,
     Integer,
     String,
@@ -76,6 +77,9 @@ class Profile(UUIDTimestampMixin, Base):
 
 class PeladaGroup(UUIDTimestampMixin, Base):
     __tablename__ = "pelada_groups"
+    __table_args__ = (UniqueConstraint('code', name='pelada_groups_code_unique'),)
+
+    code: Mapped[str] = mapped_column(String(6), server_default=FetchedValue(), nullable=False)
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
@@ -113,6 +117,20 @@ class GroupMember(UUIDTimestampMixin, Base):
 
     group: Mapped[PeladaGroup] = relationship(back_populates="members")
     profile: Mapped[Profile] = relationship(back_populates="group_memberships")
+
+
+class GroupJoinRequest(UUIDTimestampMixin, Base):
+    __tablename__ = "group_join_requests"
+    __table_args__ = (
+        UniqueConstraint("group_id", "profile_id"),
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="join_request_status"),
+    )
+
+    group_id: Mapped[UUID] = mapped_column(ForeignKey("pelada_groups.id", ondelete="CASCADE"), nullable=False)
+    profile_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending", nullable=False)
+    reviewed_by_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("profiles.id"))
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class GroupGuest(UUIDTimestampMixin, Base):

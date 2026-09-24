@@ -193,6 +193,43 @@ Referências do catálogo (funções táticas, cujos nomes podem variar por equi
 - Futsal: https://cdn.conmebol.com/wp-content/uploads/2024/02/Manual-Futsal-Port-Web.pdf
 - Fut7: https://www.cbf7.com.br/federacao/FUT7SE/equipes/bola-de-ouro-esporte-clube
 
+## Organização da API
+
+- `routers/`: caminhos, métodos HTTP, schemas de entrada/saída e injeção de
+  dependências; encaminham as chamadas para controllers.
+- `controllers/`: validações manuais, autorização, decisões de negócio,
+  alterações nas entidades e coordenação das transações.
+- `services/`: classes responsáveis exclusivamente pelas consultas e operações
+  de persistência usando a sessão recebida. Não produzem respostas HTTP.
+- `helpers/`: funções auxiliares sem consultas, como cálculo de tempo,
+  verificação da janela de inscrição e leitura de identificadores.
+- `schemas/`: arquivos por contexto (perfis, grupos, membros, convidados,
+  eventos, presenças, times, filas, partidas, escalações, ações e autenticação).
+  `crud.py` permanece apenas como fachada de imports para compatibilidade.
+
+Os endpoints, os bloqueios transacionais e os contratos existentes foram
+preservados; `code` foi acrescentado às respostas de grupos. O CRUD gerado pela
+biblioteca continua usando seus controllers/services e os schemas do projeto.
+
+## Código único dos grupos
+
+A migration `007_group_alpha_numeric_code.sql` usa a tabela `pelada_groups` e
+uma única coluna `code`. Nomes podem se repetir; códigos não.
+
+O PostgreSQL gera seis caracteres `A-Z`/`0-9` por `DEFAULT generate_group_code()`.
+Uma sequência sem ciclo, combinada com uma permutação em base 36, evita colisões
+entre criações simultâneas. Há `NOT NULL`, `UNIQUE` e validação de formato.
+Não é um sorteio aleatório: a sequência garante códigos distintos sem depender
+de tentativas concorrentes. Os clientes não precisam enviar o campo.
+
+A migration preenche códigos ausentes e pode ser reaplicada sem trocar códigos
+existentes. A inicialização de bancos novos também instala essa geração após
+`create_all`. Em bancos existentes, aplique em transação:
+
+```powershell
+Get-Content -Raw src/databases/scripts/migrations/007_group_alpha_numeric_code.sql | docker compose exec -T db psql -U fut_manager -d fut_manager -v ON_ERROR_STOP=1 --single-transaction
+```
+
 ## Dados fictícios para teste
 
 `scripts/seed_demo.py` popula um grupo existente de forma idempotente. A senha é
