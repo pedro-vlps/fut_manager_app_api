@@ -14,6 +14,8 @@ from src.routers.auth import router as auth_router
 from src.routers.groups import router as groups_router
 from src.routers.lifecycle import router as lifecycle_router
 from src.routers.event_write_guard import event_write_guard
+from src.routers.system import router as system_router
+from src.routers.group_requests import router as group_requests_router
 
 
 @asynccontextmanager
@@ -35,14 +37,10 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-def hello_world():
-    """Retorna a mensagem inicial da API."""
-    return {"message": "Hello World"}
-
-
+app.include_router(system_router)
 app.include_router(auth_router)
 app.include_router(groups_router)
+app.include_router(group_requests_router)
 app.include_router(lifecycle_router)
 
 for crud_model in CRUD_MODELS:

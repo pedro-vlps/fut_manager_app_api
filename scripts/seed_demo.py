@@ -95,6 +95,11 @@ async def seed(group_id: UUID, saturday: date, password: str, start_now=False):
                 email=email,
                 password=password,
                 is_active=True,
+                positions={
+                    "campo": ["goleiro"] if index in (0, 4) else ["meia", "atacante"],
+                    "futsal": ["goleiro"] if index in (0, 4) else ["ala_direita", "pivo"],
+                    "fut7": ["goleiro"] if index in (0, 4) else ["meia", "pivo"],
+                },
             )
             users.append(profile)
             await ensure(
