@@ -125,3 +125,16 @@ class GroupIntegrationTests(AuthTestCase):
         self.db.add(empty)
         await self.db.flush()
         self.assertEqual((await self.client.get(f'/my-groups/{empty.id}/rankings', headers=self.headers)).json(), [])
+
+    async def test_member_profile_access_and_public_fields(self):
+        url = self.base + f'/members/{self.user.id}'
+        result = await self.client.get(url, headers=self.headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(set(result.json()), {'id', 'name', 'positions', 'trophies', 'can_rate'})
+        self.assertTrue(result.json()['can_rate'])
+        self.assertEqual(result.json()['id'], str(self.user.id))
+        self.assertEqual(result.json()['trophies']['total'], 0)
+        self.assertEqual((await self.client.get(self.base + f'/members/{self.other.id}', headers=self.headers)).status_code, 404)
+        outsider = (await self.login(self.other, 'test-password-456')).json()['access_token']
+        self.assertEqual((await self.client.get(url, headers={'Authorization': f'Bearer {outsider}'})).status_code, 404)
+        self.assertEqual((await self.client.get(url)).status_code, 401)

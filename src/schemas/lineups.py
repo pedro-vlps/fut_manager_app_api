@@ -6,6 +6,8 @@ from src.models.enums import TeamPlayerRole
 
 
 class MatchLineupSchema(SCBaseModel):
+    is_active: bool = True
+    replaced_lineup_id: UUID | None = None
     id: Optional[UUID] = None
     match_id: UUID
     team_id: UUID

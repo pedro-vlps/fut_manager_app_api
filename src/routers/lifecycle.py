@@ -5,18 +5,40 @@ from src.configs.db_connection import get_db_session
 from src.models.entities import PeladaEvent, PeladaGroup, Profile
 from src.schemas.lifecycle import (
     ActionRequest,
+    ModalityRequest,
     FinishRequest,
     KickoffRequest,
     LifecycleView,
     TeamsRequest,
     TimerRequest,
+    TemporaryPlayerRequest,
 )
 from src.controllers import lifecycle as controller
+from src.schemas.events import ConfirmationSettings
 from src.routers.dependencies import current_profile, accessible_group, managed_event
 
 router = APIRouter(
     prefix="/my-groups/{group_id}/events/{event_id}", tags=["Ciclo do evento"]
 )
+
+
+@router.post("/confirmation-settings", response_model=LifecycleView)
+async def update_confirmation_settings(
+    payload: ConfirmationSettings,
+    event: PeladaEvent = Depends(managed_event),
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await controller.update_confirmation_settings(payload, event, db)
+
+
+@router.post("/matches/{match_id}/temporary-players", response_model=LifecycleView)
+async def add_temporary_player(
+    match_id: UUID,
+    payload: TemporaryPlayerRequest,
+    event: PeladaEvent = Depends(managed_event),
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await controller.add_temporary_player(match_id, payload, event, db)
 
 
 @router.get("/lifecycle", response_model=LifecycleView)
@@ -103,3 +125,8 @@ async def finish_event(
     db: AsyncSession = Depends(get_db_session),
 ):
     return await controller.finish_event(event, db)
+
+
+@router.post("/modality", response_model=LifecycleView)
+async def update_modality(payload: ModalityRequest, event: PeladaEvent = Depends(managed_event), db: AsyncSession = Depends(get_db_session)):
+    return await controller.update_modality(payload, event, db)

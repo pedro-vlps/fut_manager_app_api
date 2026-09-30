@@ -18,6 +18,19 @@ from src.services.base import DatabaseService
 
 class LifecycleService(DatabaseService):
 
+    async def event_lineups(self, event):
+        return (await self.db.scalars(
+            select(MatchLineup).join(Match).where(Match.event_id == event.id)
+            .order_by(MatchLineup.created_at, MatchLineup.id)
+        )).all()
+
+    async def person_lineup(self, match_id, person):
+        return await self.db.scalar(select(MatchLineup).where(
+            MatchLineup.match_id == match_id,
+            MatchLineup.profile_id == person.profile_id,
+            MatchLineup.guest_id == person.guest_id,
+        ))
+
     async def manager_membership(self, group, profile):
         return await self.db.scalar(
             select(GroupMember.id).where(
@@ -52,11 +65,12 @@ class LifecycleService(DatabaseService):
     async def event_people(self, event):
         return (
             await self.db.execute(
-                select(EventPresence, Profile.name, GroupGuest.name)
+                select(EventPresence, Profile.name, GroupGuest.name, Profile.positions)
                 .outerjoin(Profile, Profile.id == EventPresence.profile_id)
                 .outerjoin(GroupGuest, GroupGuest.id == EventPresence.guest_id)
                 .where(EventPresence.event_id == event.id)
                 .order_by(EventPresence.created_at, EventPresence.id)
+                .execution_options(populate_existing=True)
             )
         ).all()
 
@@ -182,6 +196,7 @@ class LifecycleService(DatabaseService):
             select(MatchLineup).where(
                 MatchLineup.match_id == match_id,
                 MatchLineup.team_id == payload.team_id,
+                MatchLineup.is_active.is_(True),
                 MatchLineup.profile_id == person.profile_id,
                 MatchLineup.guest_id == person.guest_id,
             )

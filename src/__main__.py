@@ -16,6 +16,10 @@ from src.routers.lifecycle import router as lifecycle_router
 from src.routers.event_write_guard import event_write_guard
 from src.routers.system import router as system_router
 from src.routers.group_requests import router as group_requests_router
+from src.routers.seasons import router as seasons_router
+from src.routers.trophies import router as trophies_router
+from src.routers.scheduling import router as scheduling_router
+from src.routers.draw import router as draw_router
 
 
 @asynccontextmanager
@@ -41,6 +45,10 @@ app.include_router(system_router)
 app.include_router(auth_router)
 app.include_router(groups_router)
 app.include_router(group_requests_router)
+app.include_router(seasons_router)
+app.include_router(trophies_router)
+app.include_router(scheduling_router)
+app.include_router(draw_router)
 app.include_router(lifecycle_router)
 
 for crud_model in CRUD_MODELS:

@@ -2,10 +2,15 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 from pydantic import BaseModel as SCBaseModel, model_validator
-from src.models.enums import PresenceStatus
+from src.models.enums import PresenceStatus, TeamPlayerRole
+
+
+class ConfirmRequest(SCBaseModel):
+    role: TeamPlayerRole = TeamPlayerRole.PLAYER
 
 
 class EventPresenceSchema(SCBaseModel):
+    role: TeamPlayerRole = TeamPlayerRole.PLAYER
     id: Optional[UUID] = None
     event_id: UUID
     profile_id: Optional[UUID] = None
@@ -31,6 +36,7 @@ class EventPresenceSchema(SCBaseModel):
 
 
 class EventPresenceCreateSchema(SCBaseModel):
+    role: TeamPlayerRole = TeamPlayerRole.PLAYER
     event_id: UUID
     profile_id: Optional[UUID] = None
     guest_id: Optional[UUID] = None
@@ -55,6 +61,7 @@ class EventPresenceCreateSchema(SCBaseModel):
 
 
 class EventPresenceUpdateSchema(SCBaseModel):
+    role: TeamPlayerRole | None = None
     status: Optional[PresenceStatus] = None
     waitlist_position: Optional[int] = None
     confirmed_at: Optional[datetime] = None

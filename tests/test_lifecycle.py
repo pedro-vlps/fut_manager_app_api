@@ -274,3 +274,237 @@ class LifecycleTests(AuthTestCase):
             response = await self.client.request(method,path,json=body,headers=self.headers)
             self.assertEqual(response.status_code,409,response.text)
         self.assertEqual((await self.client.get(self.base+'/lifecycle',headers=self.headers)).json(),snapshot)
+
+    async def test_temporary_players_stats_and_next_match(self):
+        state = await self.setup_match()
+        original = state['teams']
+        a, b, c = original
+        match_id = state['current_match']['id']
+        url = f'/matches/{match_id}/temporary-players'
+        borrowed = next(p for p in c['players'] if p['role'] == 'goalkeeper')
+        outgoing_keeper = next(p for p in a['players'] if p['role'] == 'goalkeeper')
+        payload = {'team_id': a['id'], 'presence_id': borrowed['presence_id'], 'outgoing_presence_id': outgoing_keeper['presence_id']}
+        await self.post(url, payload, status=403, headers=self.other_headers)
+        await self.post(url, {**payload, 'team_id': c['id']}, status=422)
+        await self.post(url, {**payload, 'presence_id': a['players'][0]['presence_id']}, status=422)
+        await self.post(url, {**payload, 'presence_id': str(uuid4())}, status=422)
+        state = await self.post(url, payload)
+        state = await self.post(url, payload)
+        self.assertEqual(state['teams'], original)
+        players = state['current_match']['players']
+        self.assertEqual(len(players), 5)
+        self.assertEqual(sum(p['is_active'] for p in players), 4)
+        self.assertFalse(next(p for p in players if p['presence_id'] == payload['outgoing_presence_id'])['is_active'])
+        temporary = next(p for p in players if p['presence_id'] == borrowed['presence_id'])
+        self.assertTrue(temporary['is_temporary'])
+        self.assertEqual(temporary['team_id'], a['id'])
+        self.assertEqual(temporary['role'], borrowed['role'])
+        await self.post(url, {**payload, 'team_id': b['id'], 'outgoing_presence_id': b['players'][0]['presence_id']}, status=409)
+        for action in ['goal', 'goal', 'assist', 'yellow_card', 'red_card', 'own_goal']:
+            state = await self.post(f'/matches/{match_id}/actions', {
+                **payload, 'id': str(uuid4()), 'action_type': action})
+        self.assertEqual({s['team_id']: s['goals'] for s in state['current_match']['scores']}, {a['id']: 2, b['id']: 1})
+        # Guests may also be borrowed; each person has one team per match.
+        state = await self.post(url, {**payload, 'presence_id': next(p['presence_id'] for p in c['players'] if p['role'] == 'player'), 'outgoing_presence_id': next(p['presence_id'] for p in a['players'] if p['role'] == 'player')})
+        self.assertEqual(len(state['current_match']['players']), 6)
+        self.assertEqual(sum(p['is_active'] for p in state['current_match']['players']), 4)
+        state = await self.post(f'/matches/{match_id}/finish', {'advancing_team_id': a['id']})
+        self.assertEqual(state['teams'], original)
+        self.assertEqual(len(state['current_match']['players']), 4)
+        returned = next(p for p in state['current_match']['players'] if p['presence_id'] == borrowed['presence_id'])
+        self.assertEqual(returned['team_id'], c['id'])
+        self.assertFalse(returned['is_temporary'])
+        past = next(m for m in state['matches'] if m['id'] == match_id)
+        self.assertEqual(sum(p['is_temporary'] for p in past['players']), 2)
+        await self.post(url, payload, status=409)
+        ranking = (await self.client.get(f'/my-groups/{self.group.id}/rankings', headers=self.headers)).json()
+        row = next(p for p in ranking if p['id'] == borrowed['person_id'])
+        self.assertEqual((row['goals'], row['assists'], row['yellow_cards'], row['red_cards'], row['own_goals'], row['wins']), (2, 1, 1, 1, 1, 1))
+        self.assertFalse(any(p['id'] in {member['person_id'] for member in a['players']} and p['wins'] for p in ranking))
+        await self.post(f"/matches/{state['current_match']['id']}/finish", {'random_tiebreak': True, 'continue_cycle': False})
+        await self.post(url, payload, status=409)
+
+    async def test_temporary_swap_validation_actions_and_event_rankings(self):
+        from types import SimpleNamespace
+        from src.controllers.rankings import calculate_rankings
+        state = await self.setup_match()
+        a, b, c = state['teams']
+        match_id = state['current_match']['id']
+        url = f'/matches/{match_id}/temporary-players'
+        outgoing = next(p for p in a['players'] if p['role'] == 'player')
+        incoming = next(p for p in c['players'] if p['role'] == 'player')  # Guest.
+        payload = {'team_id': a['id'], 'presence_id': incoming['presence_id'],
+                   'outgoing_presence_id': outgoing['presence_id']}
+        await self.post(url, {'team_id': a['id'], 'presence_id': incoming['presence_id']}, status=422)
+        for invalid in [str(uuid4()), b['players'][1]['presence_id'], incoming['presence_id']]:
+            await self.post(url, {**payload, 'outgoing_presence_id': invalid}, status=422)
+        await self.post(url, {**payload, 'presence_id': next(p['presence_id'] for p in c['players'] if p['role'] == 'goalkeeper')}, status=422)
+        action = {'team_id': a['id'], 'presence_id': outgoing['presence_id'], 'action_type': 'goal', 'id': str(uuid4())}
+        await self.post(f'/matches/{match_id}/actions', action)
+        state = await self.post(url, payload)
+        self.assertEqual(sum(p['is_active'] for p in state['current_match']['players']), 4)
+        await self.post(url, {**payload, 'outgoing_presence_id': next(p['presence_id'] for p in a['players'] if p['role'] == 'goalkeeper')}, status=409)
+        await self.post(f'/matches/{match_id}/actions', {**action, 'id': str(uuid4())}, status=422)
+        state = await self.post(f'/matches/{match_id}/actions', {**action, 'presence_id': incoming['presence_id'], 'id': str(uuid4())})
+        before = await self.client.get(self.base + '/rankings', headers=self.headers)
+        self.assertEqual(before.json(), [])  # In-progress matches are excluded.
+        state = await self.post(f'/matches/{match_id}/finish', {'continue_cycle': False})
+        result = await self.client.get(self.base + '/rankings', headers=self.headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        ranking = {p['id']: p for p in result.json()}
+        self.assertEqual((ranking[outgoing['person_id']]['goals'], ranking[outgoing['person_id']]['wins'], ranking[outgoing['person_id']]['matches']), (1, 0, 0))
+        self.assertEqual((ranking[incoming['person_id']]['goals'], ranking[incoming['person_id']]['wins'], ranking[incoming['person_id']]['matches']), (1, 1, 1))
+        self.assertTrue(ranking[incoming['person_id']]['is_guest'])
+        now = datetime.now(timezone.utc)
+        seasonal = await calculate_rankings(self.group, self.db, SimpleNamespace(starts_at=now-timedelta(days=1), ends_at=now+timedelta(days=1)))
+        self.assertEqual(next(p for p in seasonal if str(p.id) == outgoing['person_id']).wins, 0)
+        self.assertEqual(next(p for p in seasonal if str(p.id) == incoming['person_id']).wins, 1)
+        past = state['matches'][0]
+        self.assertEqual(len(past['actions']), 2)
+        self.assertFalse(next(p for p in past['players'] if p['presence_id'] == outgoing['presence_id'])['is_active'])
+
+    async def test_event_rankings_isolate_events_and_group_access(self):
+        from src.models.entities import EventTeam, GameAction, MatchTeam
+        from src.models.enums import GameActionType, MatchStatus
+        state = await self.setup_match()
+        match = state['current_match']
+        scorer = match['players'][0]
+        await self.post(f"/matches/{match['id']}/actions", {'id':str(uuid4()), 'team_id':scorer['team_id'],
+            'presence_id':scorer['presence_id'], 'action_type':'goal'})
+        await self.post(f"/matches/{match['id']}/finish", {'continue_cycle':False})
+        other_event = PeladaEvent(group_id=self.group.id, created_by_id=self.user.id,
+            title='Outro evento', scheduled_at=datetime.now(timezone.utc), status=EventStatus.FINISHED)
+        self.db.add(other_event)
+        await self.db.flush()
+        team = EventTeam(event_id=other_event.id, name='Outro time')
+        game = Match(event_id=other_event.id, sequence=1, status=MatchStatus.FINISHED)
+        self.db.add_all([team, game])
+        await self.db.flush()
+        self.db.add(MatchTeam(match_id=game.id, team_id=team.id, goals=1))
+        self.db.add(GameAction(match_id=game.id, team_id=team.id, player_id=self.user.id, action_type=GameActionType.GOAL))
+        await self.db.flush()
+        for headers in (self.headers, self.other_headers):
+            response = await self.client.get(self.base + '/rankings', headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(sum(p['goals'] for p in response.json()), 1)
+        other = await self.client.get(f'/my-groups/{self.group.id}/events/{other_event.id}/rankings', headers=self.headers)
+        self.assertEqual(sum(p['goals'] for p in other.json()), 1)
+        self.assertEqual((await self.client.get(self.base+'/rankings')).status_code, 401)
+        missing = await self.client.get(f'/my-groups/{self.group.id}/events/{uuid4()}/rankings', headers=self.headers)
+        self.assertEqual(missing.status_code, 404)
+        foreign = PeladaGroup(name='Grupo privado', created_by_id=self.other.id)
+        self.db.add(foreign)
+        await self.db.flush()
+        denied = await self.client.get(f'/my-groups/{foreign.id}/events/{self.event.id}/rankings', headers=self.headers)
+        self.assertEqual(denied.status_code, 404)
+        wrong_event = await self.client.get(f'/my-groups/{foreign.id}/events/{self.event.id}/rankings', headers=self.other_headers)
+        self.assertEqual(wrong_event.status_code, 404)
+
+    async def test_schedule_permissions_validation_and_retry(self):
+        from src.routers.scheduling import router as scheduling_router
+        self.app.include_router(scheduling_router)
+        url = f'/my-groups/{self.group.id}/schedule'
+        body = dict(id=str(uuid4()), title='Semanal', scheduled_at=(datetime.now(timezone.utc)+timedelta(days=1)).isoformat(),
+                    min_confirmed_players=8, recurring_weekly=True, schedule_timezone='America/Sao_Paulo')
+        response = await self.client.post(url, json=body, headers=self.other_headers)
+        self.assertEqual(response.status_code, 403, response.text)
+        for changes in [dict(min_confirmed_players=0), dict(scheduled_at='2020-01-01T12:00:00Z'),
+                        dict(scheduled_at='2027-01-01T12:00:00'), dict(schedule_timezone='invalid'), dict(title=' ')]:
+            response = await self.client.post(url, json={**body, **changes}, headers=self.headers)
+            self.assertEqual(response.status_code, 422, response.text)
+        for _ in range(2):
+            response = await self.client.post(url, json=body, headers=self.headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['id'], body['id'])
+            self.assertEqual(response.json()['status'], 'registration_open')
+        rows = (await self.db.scalars(select(PeladaEvent).where(PeladaEvent.id == body['id']))).all()
+        self.assertEqual(len(rows), 1)
+
+    async def test_weekly_event_successor_on_both_endings(self):
+        from zoneinfo import ZoneInfo
+        from src.controllers.scheduling import schedule_next
+        self.event.recurring_weekly = True
+        self.event.modality = 'futsal'
+        self.event.schedule_timezone = 'America/New_York'
+        # Atravessa mudança de horário de verão mantendo hora e dia locais.
+        self.event.scheduled_at = datetime(2026, 3, 1, 19, 30, tzinfo=ZoneInfo('America/New_York'))
+        self.event.location = 'Quadra teste'
+        state = await self.setup_match()
+        match_id = state['current_match']['id']
+        await self.post(f'/matches/{match_id}/finish', {'random_tiebreak': True, 'continue_cycle': False})
+        await self.post(f'/matches/{match_id}/finish', {'random_tiebreak': True, 'continue_cycle': False}, status=409)
+        await schedule_next(self.db, self.event)
+        rows = (await self.db.scalars(select(PeladaEvent).where(PeladaEvent.recurrence_parent_id == self.event.id))).all()
+        self.assertEqual(len(rows), 1)
+        successor = rows[0]
+        local = successor.scheduled_at.astimezone(ZoneInfo(self.event.schedule_timezone))
+        self.assertEqual((local.day, local.hour, local.minute), (8, 19, 30))
+        self.assertEqual(successor.location, self.event.location)
+        self.assertEqual(successor.min_confirmed_players, 6)
+        self.assertEqual(successor.status, EventStatus.REGISTRATION_OPEN)
+        self.assertTrue(successor.recurring_weekly)
+        self.assertEqual(successor.modality, 'futsal')
+        self.assertIsNone(successor.started_at)
+        people = (await self.db.scalars(select(EventPresence).where(EventPresence.event_id == successor.id))).all()
+        self.assertEqual(people, [])
+        # Encerramento sem partida também mantém a série semanal.
+        for presence in self.presences:
+            self.db.add(EventPresence(event_id=successor.id, profile_id=presence.profile_id,
+                guest_id=presence.guest_id, status=PresenceStatus.CONFIRMED))
+        await self.db.flush()
+        self.base = f'/my-groups/{self.group.id}/events/{successor.id}'
+        await self.post('/teams', {'mode': 'random', 'team_count': 3})
+        await self.post('/start')
+        await self.post('/finish')
+        next_event = await self.db.scalar(select(PeladaEvent).where(PeladaEvent.recurrence_parent_id == successor.id))
+        self.assertIsNotNone(next_event)
+        self.assertEqual(next_event.scheduled_at.astimezone(ZoneInfo(self.event.schedule_timezone)).day, 15)
+
+    async def test_nonrecurring_end_does_not_schedule_and_minimum_is_enforced(self):
+        await self.build()
+        self.event.min_confirmed_players = 7
+        self.event.max_confirmed_players = 8
+        await self.db.flush()
+        await self.post('/start', status=409)
+        self.event.min_confirmed_players = 6
+        await self.db.flush()
+        await self.post('/start')
+        await self.post('/finish')
+        successors = (await self.db.scalars(select(PeladaEvent).where(PeladaEvent.recurrence_parent_id == self.event.id))).all()
+        self.assertEqual(successors, [])
+
+    async def test_schedule_same_day_one_hour_boundary_and_timezone(self):
+        from unittest.mock import patch
+        from src.routers.scheduling import router as scheduling_router
+        self.app.include_router(scheduling_router)
+        url = f'/my-groups/{self.group.id}/schedule'
+        fixed_now = datetime(2026, 9, 26, 17, 0, tzinfo=timezone.utc)  # 14h em São Paulo
+        body = dict(title='Hoje', min_confirmed_players=6, schedule_timezone='America/Sao_Paulo')
+        with patch('src.controllers.scheduling.datetime') as clock:
+            clock.now.return_value = fixed_now
+            for scheduled, expected in [('2026-09-26T14:59:59-03:00', 422),
+                                        ('2026-09-26T15:00:00-03:00', 200),
+                                        ('2026-09-26T18:00:00Z', 200),
+                                        ('2026-09-26T15:01:00-03:00', 200)]:
+                response = await self.client.post(url, json={**body, 'id':str(uuid4()), 'scheduled_at':scheduled}, headers=self.headers)
+                self.assertEqual(response.status_code, expected, response.text)
+
+    async def test_event_modality_filters_positions_and_locks_after_start(self):
+        await self.post('/modality', {'modality':'futsal'}, status=403, headers=self.other_headers)
+        await self.post('/modality', {'modality':'invalid'}, status=422)
+        self.user.positions = {'campo': ['volante', 'meia'], 'futsal': ['fixo']}
+        await self.db.flush()
+        state = await self.post('/modality', {'modality':'futsal'})
+        self.assertEqual(state['event']['modality'], 'futsal')
+        player = next(p for p in state['participants'] if p['person_id'] == str(self.user.id))
+        self.assertEqual(player['positions'], ['Fixo'])
+        state = await self.build()
+        player = next(p for p in state['teams'][0]['players'] if p['person_id'] == str(self.user.id))
+        self.assertEqual(player['positions'], ['Fixo'])
+        state = await self.post('/modality', {'modality':'campo'})
+        player = next(p for p in state['teams'][0]['players'] if p['person_id'] == str(self.user.id))
+        self.assertEqual(player['positions'], ['Volante', 'Meia'])
+        guest = next(p for p in state['participants'] if p['is_guest'])
+        self.assertEqual(guest['positions'], [])
+        await self.post('/start')
+        await self.post('/modality', {'modality':'fut7'}, status=409)

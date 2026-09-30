@@ -12,7 +12,7 @@ async def require_manager(service, group, profile):
         member and member.status == MembershipStatus.ACTIVE
         and member.role in {GroupRole.OWNER, GroupRole.ADMIN}
     ):
-        raise HTTPException(403, "Somente owners e administradores podem gerenciar pedidos.")
+        raise HTTPException(403, "Somente owners e administradores podem gerenciar o grupo.")
 
 
 async def search(query, profile, db):

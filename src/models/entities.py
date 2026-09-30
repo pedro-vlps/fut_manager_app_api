@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -14,8 +15,10 @@ from sqlalchemy import (
     FetchedValue,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
+    Boolean,
     UniqueConstraint,
     text,
 )
@@ -80,6 +83,14 @@ class PeladaGroup(UUIDTimestampMixin, Base):
     __table_args__ = (UniqueConstraint('code', name='pelada_groups_code_unique'),)
 
     code: Mapped[str] = mapped_column(String(6), server_default=FetchedValue(), nullable=False)
+    seasons_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    season_duration_days: Mapped[int] = mapped_column(Integer, default=30, server_default=text("30"), nullable=False)
+    season_mode: Mapped[str] = mapped_column(String(10), default="days", server_default=text("'days'"), nullable=False)
+    season_months: Mapped[int] = mapped_column(Integer, default=3, server_default=text("3"), nullable=False)
+    season_day: Mapped[int] = mapped_column(Integer, default=10, server_default=text("10"), nullable=False)
+    season_fixed_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    season_timezone: Mapped[str] = mapped_column(String(80), default="America/Sao_Paulo", server_default=text("'America/Sao_Paulo'"), nullable=False)
+
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
@@ -96,6 +107,53 @@ class PeladaGroup(UUIDTimestampMixin, Base):
     events: Mapped[list[PeladaEvent]] = relationship(
         back_populates="group", cascade="all, delete-orphan"
     )
+
+
+class GroupDrawSettings(Base):
+    __tablename__ = "group_draw_settings"
+
+    group_id: Mapped[UUID] = mapped_column(ForeignKey("pelada_groups.id", ondelete="CASCADE"), primary_key=True)
+    use_positions: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    use_ratings: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    use_wins: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+
+
+class GroupPlayerRating(UUIDTimestampMixin, Base):
+    # Deliberadamente fora de CRUD_MODELS e dos schemas públicos de jogadores.
+    __tablename__ = "group_player_ratings"
+    __table_args__ = (
+        UniqueConstraint("group_id", "profile_id"),
+        CheckConstraint("rating >= 0 AND rating <= 10", name="rating_range"),
+    )
+
+    group_id: Mapped[UUID] = mapped_column(ForeignKey("pelada_groups.id", ondelete="CASCADE"), nullable=False)
+    profile_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    rating: Mapped[Decimal] = mapped_column(Numeric(3, 1), nullable=False)
+    updated_by_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("profiles.id", ondelete="SET NULL"))
+
+
+class GroupSeason(UUIDTimestampMixin, Base):
+    __tablename__ = "group_seasons"
+    __table_args__ = (
+        UniqueConstraint("group_id", "number"),
+        CheckConstraint("ends_at > starts_at", name="season_positive_period"),
+    )
+    group_id: Mapped[UUID] = mapped_column(ForeignKey("pelada_groups.id", ondelete="CASCADE"), nullable=False)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    archived_rankings: Mapped[Optional[list]] = mapped_column(JSONB(none_as_null=True))
+
+
+class SeasonTrophy(UUIDTimestampMixin, Base):
+    __tablename__ = "season_trophies"
+    __table_args__ = (UniqueConstraint("season_id", "profile_id", "category"),)
+    season_id: Mapped[UUID] = mapped_column(ForeignKey("group_seasons.id", ondelete="CASCADE"), nullable=False)
+    profile_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(250), nullable=False)
+    value: Mapped[int] = mapped_column(Integer, nullable=False)
+    awarded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class GroupMember(UUIDTimestampMixin, Base):
@@ -190,6 +248,12 @@ class PeladaEvent(UUIDTimestampMixin, Base):
     scheduled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    modality: Mapped[Optional[str]] = mapped_column(String(10))
+    recurring_weekly: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    schedule_timezone: Mapped[str] = mapped_column(String(80), nullable=False, server_default=text("'America/Sao_Paulo'"))
+    recurrence_parent_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("pelada_events.id", ondelete="SET NULL"), unique=True
+    )
     registration_opens_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True)
     )
@@ -198,6 +262,8 @@ class PeladaEvent(UUIDTimestampMixin, Base):
     )
     min_confirmed_players: Mapped[Optional[int]] = mapped_column(Integer)
     max_confirmed_players: Mapped[Optional[int]] = mapped_column(Integer)
+    min_confirmed_goalkeepers: Mapped[Optional[int]] = mapped_column(Integer)
+    max_confirmed_goalkeepers: Mapped[Optional[int]] = mapped_column(Integer)
     match_duration_minutes: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[EventStatus] = mapped_column(
         Enum(EventStatus, name="event_status"),
@@ -224,6 +290,10 @@ class PeladaEvent(UUIDTimestampMixin, Base):
 
 class EventPresence(UUIDTimestampMixin, Base):
     __tablename__ = "event_presences"
+    role: Mapped[TeamPlayerRole] = mapped_column(
+        Enum(TeamPlayerRole, name="team_player_role"), nullable=False,
+        default=TeamPlayerRole.PLAYER, server_default="PLAYER",
+    )
     __table_args__ = (
         UniqueConstraint("event_id", "profile_id", name="uq_event_presence_profile"),
         UniqueConstraint("event_id", "guest_id", name="uq_event_presence_guest"),
@@ -416,6 +486,8 @@ class MatchLineup(UUIDTimestampMixin, Base):
     """Quem efetivamente jogou a partida, inclusive o goleiro para gols sofridos."""
 
     __tablename__ = "match_lineups"
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"), nullable=False)
+    replaced_lineup_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("match_lineups.id"))
     __table_args__ = (
         UniqueConstraint("match_id", "profile_id", name="uq_match_lineup_profile"),
         UniqueConstraint("match_id", "guest_id", name="uq_match_lineup_guest"),

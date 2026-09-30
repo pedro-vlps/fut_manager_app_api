@@ -49,10 +49,13 @@ async def overview(group: PeladaGroup, profile: Profile, db: AsyncSession):
         result.next_event = EventOverview(
             **PeladaEventSchema.model_validate(event).model_dump(),
             confirmed_count=count,
+            confirmed_players_count=await service.confirmed_count(event, TeamPlayerRole.PLAYER),
+            confirmed_goalkeepers_count=await service.confirmed_count(event, TeamPlayerRole.GOALKEEPER),
             my_presence=(
                 EventPresenceSchema.model_validate(presence) if presence else None
             ),
             can_confirm=not reason and (not already),
+            can_change_role=not reason and already and event.min_confirmed_goalkeepers is not None,
             confirmation_message=reason,
         )
     return result
@@ -67,7 +70,8 @@ async def group_event(db: AsyncSession, group_id: UUID, event_id: UUID, lock=Fal
 
 
 async def confirm(
-    event_id: UUID, group: PeladaGroup, profile: Profile, db: AsyncSession
+    event_id: UUID, group: PeladaGroup, profile: Profile, db: AsyncSession,
+    role: TeamPlayerRole = TeamPlayerRole.PLAYER,
 ):
     service = GroupsService(db)
     event = await group_event(db, group.id, event_id, lock=True)
@@ -82,7 +86,7 @@ async def confirm(
     if presence and presence.status in [
         PresenceStatus.CONFIRMED,
         PresenceStatus.WAITLIST,
-    ]:
+    ] and presence.role == role:
         return EventPresenceSchema.model_validate(presence)
     now = datetime.now(timezone.utc)
     reason = registration_error(event, now)
@@ -91,11 +95,14 @@ async def confirm(
     if presence is None:
         presence = EventPresence(event_id=event.id, profile_id=profile.id)
     has_rebalance = await service.has_waitlist_trigger()
-    count = await service.confirmed_count(event)
+    separate = event.min_confirmed_goalkeepers is not None
+    count = await service.confirmed_count(event, role if separate else None)
+    capacity = event.max_confirmed_goalkeepers if separate and role == TeamPlayerRole.GOALKEEPER else event.max_confirmed_players
+    presence.role = role
     presence.status = PresenceStatus.CONFIRMED
     presence.confirmed_at = now
     presence.waitlist_position = None
-    if event.max_confirmed_players is not None and count >= event.max_confirmed_players:
+    if capacity is not None and count >= capacity:
         presence.status = PresenceStatus.WAITLIST
     service.add(presence)
     await service.flush()
@@ -124,6 +131,7 @@ async def confirmed(event_id: UUID, group: PeladaGroup, db: AsyncSession):
             id=p.profile_id or p.guest_id,
             name=name or guest_name,
             is_guest=p.guest_id is not None,
+            role=p.role.value,
         )
         for p, name, guest_name in rows
     ]
@@ -149,37 +157,26 @@ async def members(group: PeladaGroup, db: AsyncSession):
 
 
 async def rankings(group: PeladaGroup, db: AsyncSession):
-    service = GroupsService(db)
-    entries = {}
+    from src.controllers.seasons import current_rankings
+    return (await current_rankings(group, db)).rankings
 
-    def entry(profile_id, guest_id, name, guest_name):
-        key = ("guest" if guest_id else "profile", profile_id or guest_id)
-        if key not in entries:
-            entries[key] = RankingEntry(
-                id=key[1], name=name or guest_name, is_guest=guest_id is not None
-            )
-        return entries[key]
 
-    actions = await service.action_totals(group)
-    fields = {
-        "goal": "goals",
-        "own_goal": "own_goals",
-        "assist": "assists",
-        "yellow_card": "yellow_cards",
-        "red_card": "red_cards",
-    }
-    for player, guest, name, guest_name, action, count in actions:
-        person = entry(player, guest, name, guest_name)
-        setattr(person, fields[action.value], count)
-    lineups = await service.finished_lineups(group)
-    for lineup, name, guest_name, result, goals in lineups:
-        person = entry(lineup.profile_id, lineup.guest_id, name, guest_name)
-        person.matches += 1
-        person.wins += int(result == "win")
-        person.losses += int(result == "loss")
-        if lineup.role == TeamPlayerRole.GOALKEEPER:
-            person.goals_conceded += goals
-            person.goalkeeper_matches += 1
-    return sorted(
-        entries.values(), key=lambda p: (-p.goals, p.name.casefold(), str(p.id))
-    )
+async def event_rankings(event_id, group, db):
+    from src.controllers.rankings import calculate_rankings
+    await group_event(db, group.id, event_id)
+    return await calculate_rankings(group, db, event_id=event_id)
+
+
+async def member_profile(group, profile_id, db, viewer):
+    from src.schemas.member_profile import MemberProfile
+    from src.controllers.trophies import my_trophies
+    from src.controllers.lifecycle_support import can_manage
+    people = await GroupsService(db).active_members(group)
+    profile = next((p for p, _ in people if p.id == profile_id), None)
+    if profile is None and profile_id == group.created_by_id:
+        profile = await db.get(Profile, profile_id)
+    if profile is None:
+        raise HTTPException(404, "Membro não encontrado neste grupo.")
+    return MemberProfile(id=profile.id, name=profile.name, positions=profile.positions or {},
+                         trophies=await my_trophies(profile, db),
+                         can_rate=await can_manage(db, group, viewer))

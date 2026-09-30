@@ -63,13 +63,14 @@ class GroupsService(DatabaseService):
             )
         )
 
-    async def confirmed_count(self, event):
+    async def confirmed_count(self, event, role=None):
         return await self.db.scalar(
             select(func.count())
             .select_from(EventPresence)
             .where(
                 EventPresence.event_id == event.id,
                 EventPresence.status == PresenceStatus.CONFIRMED,
+                *([EventPresence.role == role] if role is not None else []),
             )
         )
 
@@ -150,7 +151,7 @@ class GroupsService(DatabaseService):
             )
         ).all()
 
-    async def action_totals(self, group):
+    async def action_totals(self, group, season=None, event_id=None):
         return (
             await self.db.execute(
                 select(
@@ -169,6 +170,8 @@ class GroupsService(DatabaseService):
                     PeladaEvent.group_id == group.id,
                     Match.status == MatchStatus.FINISHED,
                     PeladaEvent.status != EventStatus.CANCELLED,
+                    *self.season_filters(season),
+                    *([PeladaEvent.id == event_id] if event_id is not None else []),
                 )
                 .group_by(
                     GameAction.player_id,
@@ -180,7 +183,7 @@ class GroupsService(DatabaseService):
             )
         ).all()
 
-    async def finished_lineups(self, group):
+    async def finished_lineups(self, group, season=None, event_id=None):
         opponent = aliased(MatchTeam)
         conceded = (
             select(func.coalesce(func.sum(opponent.goals), 0))
@@ -213,6 +216,15 @@ class GroupsService(DatabaseService):
                     PeladaEvent.group_id == group.id,
                     Match.status == MatchStatus.FINISHED,
                     PeladaEvent.status != EventStatus.CANCELLED,
+                    *self.season_filters(season),
+                    *([PeladaEvent.id == event_id] if event_id is not None else []),
+                    MatchLineup.is_active.is_(True),
                 )
             )
         ).all()
+
+    @staticmethod
+    def season_filters(season):
+        # A partida conta no período em que terminou. O limite final é exclusivo.
+        completed_at = func.coalesce(Match.ended_at, Match.started_at, PeladaEvent.started_at, PeladaEvent.scheduled_at)
+        return [] if season is None else [completed_at >= season.starts_at, completed_at < season.ends_at]

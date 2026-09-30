@@ -36,10 +36,20 @@ class ActionRequest(BaseModel):
     minute: int | None = Field(default=None, ge=0, le=999)
 
 
+class TemporaryPlayerRequest(BaseModel):
+    team_id: UUID
+    presence_id: UUID
+    outgoing_presence_id: UUID
+
+
 class FinishRequest(BaseModel):
     advancing_team_id: UUID | None = None
     random_tiebreak: bool = False
     continue_cycle: bool = True
+
+
+class ModalityRequest(BaseModel):
+    modality: Literal["campo", "futsal", "fut7"]
 
 
 class TimerRequest(BaseModel):
@@ -47,6 +57,7 @@ class TimerRequest(BaseModel):
 
 
 class Participant(BaseModel):
+    positions: list[str] = Field(default_factory=list)
     presence_id: UUID
     person_id: UUID
     name: str
@@ -59,6 +70,12 @@ class TeamView(BaseModel):
     name: str
     color: str | None
     players: list[Participant]
+
+
+class MatchParticipant(Participant):
+    team_id: UUID
+    is_temporary: bool
+    is_active: bool = True
 
 
 class ScoreView(BaseModel):
@@ -83,6 +100,7 @@ class MatchView(BaseModel):
     advancing_team_id: UUID | None
     scores: list[ScoreView]
     actions: list[ActionView]
+    players: list[MatchParticipant]
     timer_elapsed_ms: int
     timer_running: bool
 

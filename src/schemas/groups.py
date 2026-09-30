@@ -61,8 +61,11 @@ from src.schemas.presences import EventPresenceSchema
 
 class EventOverview(PeladaEventSchema):
     confirmed_count: int
+    confirmed_players_count: int = 0
+    confirmed_goalkeepers_count: int = 0
     my_presence: EventPresenceSchema | None
     can_confirm: bool
+    can_change_role: bool = False
     confirmation_message: str | None
 
 
