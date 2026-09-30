@@ -8,7 +8,7 @@ class GroupRequestsService(DatabaseService):
         return await self.db.scalar(select(PeladaGroup).where(PeladaGroup.code == code))
 
     async def locked_group(self, group_id):
-        return await self.db.scalar(select(PeladaGroup).where(PeladaGroup.id == group_id).with_for_update())
+        return await self.db.scalar(select(PeladaGroup).where(PeladaGroup.id == group_id).with_for_update().execution_options(populate_existing=True))
 
     async def membership(self, group_id, profile_id):
         return await self.db.scalar(select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.profile_id == profile_id))

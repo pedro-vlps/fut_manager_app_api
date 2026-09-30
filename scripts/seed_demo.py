@@ -1,7 +1,8 @@
-"""Popula um grupo existente com dados fictícios, sem sobrescrever registros.
+"""Popula um grupo existente com dados fictícios e garante o owner de demonstração.
 
 Uso: FUT_MANAGER_DEMO_PASSWORD=... python -m scripts.seed_demo --group-id UUID --saturday 2026-09-26
 IDs determinísticos permitem repetir o comando sem duplicar ou resetar testes.
+A conta email@email.com recebe senha123 e vínculo OWNER ativo em todos os grupos.
 """
 
 import argparse
@@ -13,7 +14,7 @@ from datetime import date, datetime, time, timedelta
 from uuid import UUID, uuid5
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from src.configs.db_connection import SessionLocal, engine
 from src.models.entities import (
     EventPresence,
@@ -22,6 +23,7 @@ from src.models.entities import (
     GameAction,
     GroupGuest,
     GroupMember,
+    GroupSeason,
     Match,
     MatchLineup,
     MatchTeam,
@@ -41,7 +43,36 @@ from src.models.enums import (
 )
 
 
-async def seed(group_id: UUID, saturday: date, password: str, start_now=False):
+async def ensure_demo_owner(db):
+    """Garante o acesso de teste em todos os grupos sem alterar seus criadores."""
+    owner = await db.scalar(
+        select(Profile).where(func.lower(Profile.email) == "email@email.com")
+    )
+    if owner is None:
+        owner = Profile(name="Owner de demonstração", email="email@email.com",
+                        password="senha123", is_active=True)
+        db.add(owner)
+        await db.flush()
+    else:
+        owner.is_active = True
+        if not owner.verify_password("senha123"):
+            owner.password = "senha123"
+
+    groups = (await db.scalars(select(PeladaGroup).order_by(PeladaGroup.id))).all()
+    for group in groups:
+        membership = await db.scalar(select(GroupMember).where(
+            GroupMember.group_id == group.id, GroupMember.profile_id == owner.id
+        ))
+        if membership is None:
+            membership = GroupMember(group_id=group.id, profile_id=owner.id)
+            db.add(membership)
+        membership.role = GroupRole.OWNER
+        membership.status = MembershipStatus.ACTIVE
+    await db.flush()
+    return {"email": owner.email, "role": "owner", "groups": len(groups)}
+
+
+async def seed(group_id: UUID, saturday: date, password: str, start_now=False, with_seasons=False):
     if saturday.weekday() != 5:
         raise ValueError("A data do próximo evento precisa ser um sábado.")
     if len(password) < 8:
@@ -56,6 +87,8 @@ async def seed(group_id: UUID, saturday: date, password: str, start_now=False):
         )
         if group is None:
             raise ValueError("Grupo não encontrado. Nenhum dado foi criado.")
+
+        owner_summary = await ensure_demo_owner(db)
 
         def uid(key):
             return uuid5(group_id, f"futmanager-demo-v1:{key}")
@@ -126,8 +159,13 @@ async def seed(group_id: UUID, saturday: date, password: str, start_now=False):
             name="Rafael Convidado (teste)",
         )
 
-        for week, scores in [(3, (3, 1)), (2, (2, 2)), (1, (1, 2))]:
+        fixtures = [(3, (3, 1)), (2, (2, 2)), (1, (1, 2))]
+        if with_seasons:
+            fixtures.append((0, (4, 3)))
+        for week, scores in fixtures:
             day = scheduled - timedelta(weeks=week)
+            if week == 0:
+                day = min(day, datetime.now(zone) - timedelta(hours=1))
             key = f"history:{day.date()}"
             event = await ensure(
                 PeladaEvent,
@@ -310,6 +348,7 @@ async def seed(group_id: UUID, saturday: date, password: str, start_now=False):
             confirmed_at=datetime.now(zone),
         )
         summary = {
+            "owner": owner_summary,
             "group": group.name,
             "group_id": str(group.id),
             "upcoming_event_id": str(upcoming.id),
@@ -317,6 +356,28 @@ async def seed(group_id: UUID, saturday: date, password: str, start_now=False):
             "created": dict(counts),
             "accounts": accounts,
         }
+        if with_seasons:
+            from src.controllers.seasons import synchronize
+            from src.services.seasons import SeasonsService
+
+            service = SeasonsService(db)
+            if await service.latest(group.id) is None:
+                group.seasons_enabled = True
+                group.season_duration_days = 7
+                # Três temporadas concluídas e a atual iniciada na sexta-feira.
+                anchor = datetime.combine(saturday - timedelta(days=22), time(0), zone)
+                await ensure(GroupSeason, "season:first", group_id=group.id, number=1,
+                             starts_at=anchor, ends_at=anchor + timedelta(days=7))
+            _, current = await synchronize(service, group.id)
+            from src.controllers.trophies import award_season
+            for archived in await service.history(group.id):
+                await award_season(db, group, archived)
+            summary["seasons"] = {
+                "enabled": group.seasons_enabled,
+                "duration_days": group.season_duration_days,
+                "current_number": current.number if current else None,
+                "archived_count": len(await service.history(group.id)),
+            }
     await engine.dispose()
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -330,6 +391,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Cria o evento atual com seis confirmados e pronto para iniciar.",
     )
+    parser.add_argument("--seasons", action="store_true", help="Inclui temporadas semanais e estatísticas na temporada atual.")
     args = parser.parse_args()
     password = os.environ.get("FUT_MANAGER_DEMO_PASSWORD", "")
-    asyncio.run(seed(args.group_id, args.saturday, password, args.start_now))
+    asyncio.run(seed(args.group_id, args.saturday, password, args.start_now, args.seasons))

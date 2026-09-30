@@ -1,12 +1,14 @@
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from src.models.entities import EventTeamQueueEntry, Match, MatchLineup, MatchTeam
-from src.models.enums import EventStatus, GameActionType, MatchStatus, PresenceStatus
+from src.models.enums import EventStatus, GameActionType, MatchStatus, PresenceStatus, TeamPlayerRole
 from src.schemas.events import PeladaEventSchema
+from src.schemas.player_positions import MODALITIES
 from src.schemas.lifecycle import (
     ActionView,
     LifecycleView,
     MatchView,
+    MatchParticipant,
     Participant,
     ScoreView,
     TeamView,
@@ -37,9 +39,11 @@ async def snapshot(db, event, manager):
     people = await service.event_people(event)
     person_map = {}
     participants = []
-    for p, name, guest_name in people:
+    for p, name, guest_name, positions in people:
         person = Participant(
+            positions=[MODALITIES.get(event.modality, {}).get("positions", {}).get(code, code) for code in (positions or {}).get(event.modality, [])],
             presence_id=p.id,
+            role=p.role,
             person_id=p.profile_id or p.guest_id,
             name=name or guest_name,
             is_guest=p.guest_id is not None,
@@ -66,6 +70,8 @@ async def snapshot(db, event, manager):
     matches = await service.event_matches(event)
     scores = await service.event_scores(event)
     actions = await service.event_actions(event)
+    lineups = await service.event_lineups(event)
+    original_teams = {(p.profile_id, p.guest_id): p.team_id for p in players}
     now = datetime.now(timezone.utc)
     views = [
         MatchView(
@@ -73,6 +79,19 @@ async def snapshot(db, event, manager):
             sequence=m.sequence,
             status=m.status,
             advancing_team_id=m.advancing_team_id,
+            players=[
+                MatchParticipant(
+                    **person_map[p.profile_id, p.guest_id].model_dump(exclude={"role"}),
+                    role=p.role,
+                    team_id=p.team_id,
+                    is_active=p.is_active,
+                    is_temporary=p.replaced_lineup_id is not None or (
+                        original_teams.get((p.profile_id, p.guest_id)) != p.team_id
+                        and not (event.min_confirmed_goalkeepers is not None and p.role == TeamPlayerRole.GOALKEEPER)),
+                )
+                for p in lineups
+                if p.match_id == m.id and (p.profile_id, p.guest_id) in person_map
+            ],
             timer_elapsed_ms=timer_elapsed(m, now),
             timer_running=m.timer_running_since is not None
             and m.status == MatchStatus.IN_PROGRESS,

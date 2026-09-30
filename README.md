@@ -5,8 +5,27 @@
 O projeto usa PostgreSQL e SQLAlchemy assíncrono. Para iniciar localmente:
 
 ```bash
+docker volume create fut_manager_app_api_postgres_data
 docker compose up --build
 ```
+
+O comando `docker volume create` prepara o armazenamento na primeira execução;
+se o volume já existe, ele é reutilizado sem apagar os dados. Nesta máquina, o
+volume existente continua sendo usado, sem necessidade de migrar o banco.
+
+O PostgreSQL usa o volume externo `fut_manager_app_api_postgres_data`, com nome
+fixo e independente do nome da pasta/projeto Compose. Por ser externo, ele não é
+removido por `docker compose down -v`. Para desligar e subir novamente mantendo
+todos os registros do banco:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+A remoção manual desse volume ou dos dados do Docker ainda apaga o banco; a
+persistência não substitui um backup. As sessões de login da API ficam em memória
+e exigem novo login após reiniciar, mas contas e demais registros permanecem.
 
 O `lifespan` da API cria o esquema em um banco vazio. Isto facilita o início do
 projeto; quando houver dados reais, a evolução do esquema deve passar a ser feita
@@ -42,6 +61,30 @@ Cada evento tem `min_confirmed_players` e `max_confirmed_players`. A confirmaç�
 automaticamente a `waitlist`, com `waitlist_position`. Cancelar ou remover uma
 presença promove a primeira pessoa da espera e renumera a fila. O banco impede que
 um evento entre em andamento sem o mínimo de pessoas confirmadas.
+
+Com a opção **Separar vagas de goleiros**, `min_confirmed_players` e
+`max_confirmed_players` contam apenas jogadores de linha. Configure também
+`min_confirmed_goalkeepers` e `max_confirmed_goalkeepers` (por exemplo, 18/18
+jogadores e 2/2 goleiros). Limites máximos nulos deixam as vagas sem limite;
+`min_confirmed_goalkeepers = null` mantém a capacidade conjunta dos eventos antigos.
+A migration `014_goalkeeper_confirmations.sql` adiciona essas colunas e adapta a
+fila do banco: uma vaga liberada só promove alguém da mesma função.
+
+O agendamento aceita esses campos. Antes do início, organizadores podem alterá-los
+em `POST /my-groups/{group_id}/events/{event_id}/confirmation-settings`; salvar
+invalida a formação anterior e atualiza a lista de espera. A configuração é
+preservada nos eventos recorrentes. A confirmação aceita `{ "role": "player" }`
+ou `{ "role": "goalkeeper" }`; repetir a mesma função é idempotente e alterá-la,
+enquanto as inscrições estiverem abertas, submete a pessoa às vagas da nova função.
+
+O sorteio separa jogadores de linha e goleiros. Com exatamente dois goleiros,
+18 jogadores formam três times de seis jogadores de linha. Os goleiros são
+sorteados entre os dois times do primeiro confronto; nas partidas seguintes,
+o goleiro do time que sai assume o time que entra, inclusive após desempate.
+A escalação de cada partida fica preservada para histórico e estatísticas.
+Com três ou quatro goleiros, cada um permanece no time em que foi escalado;
+há no máximo um goleiro por time. Eventos antigos mantêm o sorteio anterior até
+que a separação seja ativada.
 
 ### Credenciais de perfil
 
@@ -119,6 +162,22 @@ As datas são enviadas com fuso e exibidas no horário local do aparelho.
 Testes adicionais: `tests/test_groups.py`, com rollback dos dados de cada caso.
 
 ### Cálculo dos rankings
+
+`GET /my-groups/{group_id}/events/{event_id}/rankings` retorna as mesmas categorias
+do ranking do grupo, limitadas às partidas finalizadas daquele evento. Está
+disponível para membros do grupo também após o encerramento, independentemente
+do calendário de temporadas. O app oferece acesso pela tela do evento e pelo histórico.
+
+As trocas temporárias usam `POST /my-groups/{group_id}/events/{event_id}/matches/{match_id}/temporary-players`
+com `team_id`, `presence_id` (quem entra de um time da fila) e
+`outgoing_presence_id` (quem sai do time em campo). A função deve ser a mesma.
+A migration `015_temporary_substitutions.sql` preserva a escalação e marca quem
+sai com `is_active=false`: ele não recebe vitória, derrota, participação ou gols
+sofridos daquela partida. Seus lances anteriores permanecem na súmula e nos
+rankings, mas novos lances exigem um jogador ativo. A troca é idempotente,
+mantém a quantidade de jogadores ativos e não altera a formação do evento;
+na próxima partida a escalação original volta. Registros anteriores à migration
+permanecem ativos, pois não há informação histórica de quem ficou fora.
 
 Os rankings não são armazenados como contadores em `profiles`: são agregados por
 grupo a partir dos jogos finalizados, sem duplicar totais. Correções de lances
@@ -230,10 +289,113 @@ existentes. A inicialização de bancos novos também instala essa geração ap�
 Get-Content -Raw src/databases/scripts/migrations/007_group_alpha_numeric_code.sql | docker compose exec -T db psql -U fut_manager -d fut_manager -v ON_ERROR_STOP=1 --single-transaction
 ```
 
+## Avaliações privadas e parâmetros de sorteio
+
+Owners e administradores avaliam os jogadores em cada grupo, de **0 a 10**,
+com até **uma casa decimal**, incluindo a própria avaliação. Jogadores comuns
+não podem consultar ou alterar nenhuma nota. As notas são privadas, independentes
+por grupo e não aparecem nos perfis públicos, rankings ou CRUD genérico.
+Nas listas dos times, somente responsáveis veem as notas atuais dos
+jogadores, incluindo a própria avaliação.
+`GET /my-groups/{group_id}/events/{event_id}/team-ratings` retorna as avaliações
+autorizadas do elenco; jogadores comuns recebem um mapa vazio. O endpoint de
+ciclo de partidas continua sem notas. Ausência de avaliação aparece como
+"Sem avaliação", sem confundir com o valor neutro usado no cálculo.
+
+- `GET/POST /my-groups/{group_id}/members/{profile_id}/rating`: consulta ou salva
+  `{ "rating": 7.5 }`; `null` remove a avaliação. Exige responsável pelo grupo e
+  jogador pertencente ao grupo. Alterações são permitidas mesmo durante eventos.
+- `GET/POST /my-groups/{group_id}/draw-settings`: configura `use_positions`,
+  `use_ratings` e `use_wins`. Apenas responsáveis podem salvar. Todos os critérios
+  começam desligados; nesse caso, o sorteio continua aleatório.
+
+O sorteio considera os critérios ativos na ordem **posição → nota → vitórias**.
+Usa posições da modalidade do evento (preferências múltiplas contribuem igualmente),
+avaliações atuais do grupo e vitórias em partidas finalizadas desse grupo, incluindo
+todas as temporadas. Eventos cancelados e jogadores que ficaram fora da partida
+não contam para vitórias. Sem avaliação, o cálculo usa 5,0; sem histórico, zero
+vitórias. Convidados recebem os mesmos valores neutros e suas vitórias existentes.
+
+O algoritmo distribui os jogadores e melhora a formação por trocas que reduzem a
+diferença entre times. A comparação respeita a prioridade: um critério posterior
+nunca piora um anterior para melhorar sua pontuação. Quantidade de jogadores e
+vagas separadas de goleiros são preservadas; empates têm desempate aleatório.
+O balanceamento é heurístico, não uma garantia de encontrar a formação ótima.
+Com dois goleiros, o rodízio existente entre as partidas continua funcionando.
+Mudanças de notas ou parâmetros valem para o próximo sorteio, sem alterar times
+já montados. A seleção e as trocas manuais continuam disponíveis.
+
+Migration aditiva: `016_draw_settings_and_ratings.sql`. Ela também é aplicada na
+inicialização de desenvolvimento. Testes: `tests/test_draw.py` e
+`tests/test_team_balance.py`, além das regressões de ciclo e goleiros.
+
 ## Dados fictícios para teste
 
 `scripts/seed_demo.py` popula um grupo existente de forma idempotente. A senha é
 lida de `FUT_MANAGER_DEMO_PASSWORD`; não é necessário editar o script.
+O seed também cria ou atualiza a conta de demonstração `email@email.com`, com
+senha `senha123`, e garante seu vínculo ativo como `owner` em todos os grupos
+existentes. Ao repetir o seed, essa senha é restaurada se tiver sido alterada;
+as senhas das demais contas e os criadores originais dos grupos são preservados.
 Use `--group-id UUID --saturday 2026-09-26 --start-now` para criar três eventos
 históricos e um evento atual com seis confirmados. O script preserva registros
 existentes e não reinicia um evento que o usuário já começou a testar.
+
+Acrescente `--seasons` para preparar temporadas semanais: três encerradas e uma
+atual com uma partida finalizada, além do evento disponível para testar o ciclo.
+Configurações de temporadas já existentes são preservadas ao repetir o seed.
+
+## Temporadas opcionais
+
+A migration `009_group_seasons.sql` adiciona configurações ao grupo e períodos
+com rankings arquivados. Por padrão, temporadas ficam desativadas e o ranking
+continua acumulando todas as partidas. Owners e administradores podem ativar a
+opção em `POST /my-groups/{group_id}/settings`, usando
+`{"enabled": true, "duration_days": 30}`. Durações válidas: 1 a 3650 dias.
+
+O primeiro período começa ao ativar. Alterar a duração afeta a próxima temporada;
+desativar encerra a atual, preserva seu histórico e restaura o ranking geral.
+Reativar inicia um novo período, sem reabrir ou alterar os anteriores.
+
+As partidas são contabilizadas pela finalização (`ended_at`), no intervalo
+`starts_at <= ended_at < ends_at`. Partidas antigas sem esse campo usam a data
+de início ou, na ausência dela, a data do evento. Não há exclusão de estatísticas.
+A virada é reconciliada automaticamente na consulta de configurações, rankings
+ou temporadas, sob lock do grupo, inclusive após vários períodos sem acesso.
+Rankings de períodos encerrados são persistidos como snapshots somente de leitura.
+
+- `GET /my-groups/{group_id}/settings`: configuração e temporada atual.
+- `GET /my-groups/{group_id}/season-rankings`: período atual e seu ranking; sem
+  temporadas, retorna o ranking geral.
+- `GET /my-groups/{group_id}/seasons`: temporadas encerradas.
+- `GET /my-groups/{group_id}/seasons/{season_id}/rankings`: registros arquivados.
+
+O endpoint existente `/rankings` mantém o formato de lista e considera apenas a
+temporada atual quando a opção está ativada. Todas essas consultas exigem acesso
+ao grupo. Pedidos de entrada continuam visíveis e gerenciáveis exclusivamente
+por owners e administradores.
+
+## Troféus de temporadas
+
+A migration `010_season_trophies.sql` persiste os troféus de cada perfil. Quando
+uma temporada é arquivada, todos os empatados no primeiro lugar de cada categoria
+recebem a premiação. Categorias com contagem zero não premiam ninguém, exceto
+goleiros que atuaram e terminaram com zero gols sofridos (menor total vence).
+Convidados continuam no ranking, mas não recebem troféus por não terem perfil;
+o segundo colocado não é promovido quando o líder é convidado.
+
+`GET /auth/me/trophies` retorna o total, as quantidades por categoria e a lista
+completa do usuário autenticado. O perfil também reconcilia temporadas vencidas
+dos grupos em que o jogador participou. Não há endpoints de edição de troféus.
+Uma chave única por temporada, perfil e categoria impede duplicatas. Os títulos
+preservam o nome do grupo no momento da premiação.
+
+O seed com `--seasons` inclui as premiações. Para premiar temporadas anteriormente
+arquivadas sem alterar seus rankings:
+
+```powershell
+Get-Content -Raw scripts/backfill_trophies.py | docker compose exec -T api python -
+```
+
+Na base de demonstração, `carlos.teste@futmanager.test` possui troféus de artilharia
+e outras categorias. Contas que não disputaram partidas exibem a coleção vazia.

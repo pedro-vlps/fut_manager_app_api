@@ -60,6 +60,10 @@ async def check_write(model, request: Request, db: AsyncSession):
         if item:
             if model is PeladaEvent:
                 ids.add(item.id)
+                if item.recurring_weekly and request.method in {"POST", "PATCH", "PUT"}:
+                    values = await request.json()
+                    if isinstance(values, dict) and values.get("status") == "finished":
+                        raise HTTPException(409, "Encerre o evento pelo ciclo de partidas para criar a próxima semana.")
             else:
                 ids.update(
                     await referenced_events(

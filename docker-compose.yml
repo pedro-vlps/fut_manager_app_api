@@ -39,3 +39,6 @@ services:
 
 volumes:
   postgres_data:
+    # Externo para sobreviver inclusive a docker compose down -v.
+    external: true
+    name: fut_manager_app_api_postgres_data
