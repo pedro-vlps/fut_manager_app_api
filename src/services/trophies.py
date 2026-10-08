@@ -2,9 +2,13 @@ from sqlalchemy import select, or_
 from sqlalchemy.dialects.postgresql import insert
 from src.models.entities import SeasonTrophy, GroupSeason, GroupMember, PeladaGroup, PeladaEvent, Match, MatchLineup
 from src.services.base import DatabaseService
+from src.models.championships import ChampionshipTrophy
 
 
 class TrophiesService(DatabaseService):
+    async def championship_awards(self, profile_id):
+        return (await self.db.scalars(select(ChampionshipTrophy).where(ChampionshipTrophy.profile_id == profile_id))).all()
+
     async def insert_awards(self, awards):
         if awards:
             await self.db.execute(insert(SeasonTrophy).values(awards).on_conflict_do_nothing(

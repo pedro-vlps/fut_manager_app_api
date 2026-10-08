@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict
 class TrophySchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
-    season_id: UUID
+    season_id: UUID | None = None
+    championship_id: UUID | None = None
     category: str
     title: str
     value: int

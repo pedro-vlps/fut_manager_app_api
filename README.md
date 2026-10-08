@@ -1,5 +1,46 @@
 # Fut Manager API
 
+## Campeonatos sazonais
+
+Campeonatos são edições independentes dos grupos de pelada e das temporadas de
+rankings. `POST /championships` recebe nome, temporada, descrição opcional,
+`capacity` (4, 8 ou 16) e `format` (`groups_knockout`, `knockout` ou `cascade`).
+Todas as rotas exigem login. `GET /championships` permite descobrir as edições;
+`GET /championships/{id}` mostra inscritos, elencos, partidas e classificação.
+
+O jogador cria um time permanente em `POST /clubs`. O criador convida contas
+existentes por e-mail em `POST /clubs/{id}/invitations`; o destinatário consulta
+`GET /club-invitations` e aceita/recusa com `POST /club-invitations/{id}` e
+`{"accept": true/false}`. Os convites ficam no app, sem envio de e-mail.
+
+Somente o criador do time pode inscrevê-lo em
+`POST /championships/{id}/entries` (`club_id`). O elenco precisa ter pelo menos
+dois jogadores ativos e confirmados, incluindo o criador. O elenco é congelado
+na inscrição; um jogador não pode representar dois times na mesma edição.
+Antes do início, `POST /championships/{id}/entries/{club_id}/withdraw` permite
+retirar e reinscrever o time para atualizar seu elenco. Convites aceitos depois
+da inscrição não alteram retroativamente o elenco inscrito.
+
+Somente o organizador inicia (`POST /championships/{id}/start`) e registra
+resultados (`POST /championships/{id}/matches/{match_id}/score`). É necessário
+preencher todas as vagas. O chaveamento segue a ordem de inscrição. Grupos de
+quatro jogam todos contra todos em turno único, classificando dois por grupo;
+com quatro times, os dois primeiros disputam a final. A classificação usa
+pontos (3/1/0), saldo, gols marcados e ordem de inscrição. Grupos adjacentes
+cruzam primeiro contra segundo. Empates no mata-mata exigem `winner_id` junto
+de `home_score` e `away_score`. Resultados confirmados são definitivos e geram
+a rodada seguinte automaticamente; a final define o campeão e encerra a edição.
+
+Cascata aceita somente **4 times**, com seeds 1 × 4 e 2 × 3. São seis partidas em ordem obrigatória: duas semifinais dos vencedores, final dos vencedores, semifinal dos perdedores, final dos perdedores e final geral única (sem reset). Quem perde a final dos vencedores entra diretamente na final dos perdedores, descansando durante a semifinal dessa chave. Quem perde na chave dos perdedores é eliminado.
+
+A migration aditiva `017_championships.sql` cria as seis tabelas, sem modificar
+os grupos existentes. Em bancos novos, elas são criadas pelo `create_schema`.
+Os modelos não são expostos pelo CRUD genérico. Inscrições/início/resultados
+usam lock da edição; convites e inscrição também usam lock do time.
+
+O app usa `POST /my-groups` para criar grupos com o usuário autenticado como
+organizador, sem aceitar um criador arbitrário no payload.
+
 ## Banco de dados
 
 O projeto usa PostgreSQL e SQLAlchemy assíncrono. Para iniciar localmente:
@@ -399,3 +440,54 @@ Get-Content -Raw scripts/backfill_trophies.py | docker compose exec -T api pytho
 
 Na base de demonstração, `carlos.teste@futmanager.test` possui troféus de artilharia
 e outras categorias. Contas que não disputaram partidas exibem a coleção vazia.
+
+### Troféus exclusivos dos campeonatos
+
+A final concede campeão e vice-campeão a todos os jogadores dos elencos inscritos,
+e artilheiro/líder de assistências a todos os empatados na maior marca positiva.
+As quatro categorias são exclusivas dos campeonatos, separadas dos rankings de
+pelada, e aparecem na edição e na coleção do perfil. A premiação é transacional e
+idempotente; títulos preservam o nome e a edição do campeonato.
+
+O resultado aceita `statistics: [{profile_id, goals, assists, own_goals}]`.
+Só jogadores inscritos nos dois times podem receber estatísticas. Gols próprios
+mais gols contra adversários devem bater exatamente com o placar. Assistências
+não podem exceder gols do time nem incluir assistência para o próprio gol.
+Disputas de pênaltis não contam para artilharia. O app envia as estatísticas ao
+confirmar o resultado. Clientes antigos podem omiti-las, mas uma edição com
+partidas sem atribuição completa dos gols não distribui troféus individuais.
+
+A migration `018_cascade_trophies.sql` adiciona estatísticas e troféus e limita
+novas cascatas a quatro times. Edições legadas de cascata com 8/16 vagas são
+preservadas, mas não podem iniciar; é necessário criar uma edição de quatro.
+Com `create_schema_on_startup`, a migration 018 também roda na inicialização.
+### Código de convite do campeonato
+
+Cada campeonato recebe um código único de seis caracteres A–Z/0–9, gerado pelo
+banco. A migration `019_championship_codes.sql` preenche códigos das edições
+existentes e instala o gerador para novas edições; também roda na inicialização
+com `create_schema_on_startup`. Reaplicar preserva os códigos já atribuídos.
+`GET /championship-discovery/search?code=AACO7E` exige login, aceita minúsculas e
+retorna a edição. A inscrição continua usando `/championships/{id}/entries`, com
+as mesmas validações de responsável, elenco, vagas e situação do campeonato.
+
+### Súmula dos campeonatos
+
+A migration `020_championship_actions.sql` adiciona a súmula persistente às partidas existentes, preservando os resultados anteriores. Aplique-a antes de atualizar a API em ambientes sem criação automática de esquema.
+
+O organizador registra ou remove gols, assistências, gols contra e cartões em `/championships/{id}/matches/{match_id}/actions` e `/actions/{action_id}/remove`. Cada lance usa um UUID para evitar duplicação em tentativas repetidas. A finalização envia `action_ids` na ordem da súmula, calcula as estatísticas a partir dos lances salvos e rejeita uma súmula desatualizada. Resultados antigos continuam disponíveis; seus lances não são reconstruídos a partir dos totais.
+
+## Criar um banco novo com SQL
+
+O arquivo `src/databases/scripts/create_database.sql` contém o esquema completo para PostgreSQL 17: 26 tabelas, enums, índices, chaves, funções, sequências e gatilhos, incluindo campeonatos e súmulas. Não inclui contas, senhas nem dados de demonstração.
+
+1. Crie um banco vazio no provedor ou execute `CREATE DATABASE fut_manager WITH ENCODING 'UTF8';` conectado ao banco administrativo `postgres`, fora de uma transação.
+2. Conecte-se ao banco novo e execute o arquivo inteiro no editor SQL, ou use:
+
+```bash
+psql -h HOST -U USUARIO -d fut_manager -v ON_ERROR_STOP=1 -f src/databases/scripts/create_database.sql
+```
+
+3. Configure as variáveis `FUT_MANAGER_DATABASE_*` da API para esse banco. Em produção, use `FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP=false` e aplique futuras migrações versionadas.
+
+O script é transacional e destinado apenas à primeira criação: não o reaplique em um banco existente. IDs e valores definidos como defaults Python são preenchidos pela API. Para atualizar o arquivo após mudanças nos modelos/bootstrap, execute `python -m scripts.export_database_schema` no ambiente configurado da API; a geração não lê dados do banco.
