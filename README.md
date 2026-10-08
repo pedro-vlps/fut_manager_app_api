@@ -491,3 +491,9 @@ psql -h HOST -U USUARIO -d fut_manager -v ON_ERROR_STOP=1 -f src/databases/scrip
 3. Configure as variáveis `FUT_MANAGER_DATABASE_*` da API para esse banco. Em produção, use `FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP=false` e aplique futuras migrações versionadas.
 
 O script é transacional e destinado apenas à primeira criação: não o reaplique em um banco existente. IDs e valores definidos como defaults Python são preenchidos pela API. Para atualizar o arquivo após mudanças nos modelos/bootstrap, execute `python -m scripts.export_database_schema` no ambiente configurado da API; a geração não lê dados do banco.
+
+## Documentação da API no deploy
+
+Configure `FUT_MANAGER_DOCS_ENABLED=false` em produção para desativar `/docs`, `/redoc`, `/openapi.json` e o redirecionamento OAuth do Swagger. As rotas normais da API continuam disponíveis. A configuração é independente de `FUT_MANAGER_DEBUG` e, sem a variável, o padrão da aplicação é `false`.
+
+Para desenvolvimento, use `FUT_MANAGER_DOCS_ENABLED=true`. O Docker Compose local usa `true` por padrão e permite sobrescrever pela variável de ambiente ou pelo `.env`. Reinicie a API após alterar a configuração; no Compose, recrie o serviço com `docker compose up -d --force-recreate api`.

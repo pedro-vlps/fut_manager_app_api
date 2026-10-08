@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     app_name: str
     debug: bool
+    docs_enabled: bool = False
     database_host: str = Field(min_length=1)
     database_port: int = Field(ge=1, le=65535)
     database_name: str = Field(min_length=1)

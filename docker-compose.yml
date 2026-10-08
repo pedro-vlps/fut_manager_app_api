@@ -10,6 +10,7 @@ services:
     environment:
       FUT_MANAGER_APP_NAME: Fut Manager API
       FUT_MANAGER_DEBUG: "false"
+      FUT_MANAGER_DOCS_ENABLED: "${FUT_MANAGER_DOCS_ENABLED:-true}"
       FUT_MANAGER_DATABASE_HOST: db
       FUT_MANAGER_DATABASE_PORT: 5432
       FUT_MANAGER_DATABASE_NAME: fut_manager
