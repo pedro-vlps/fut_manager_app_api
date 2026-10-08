@@ -2,6 +2,7 @@
 
 from src.configs.db_connection import get_db_session
 from src.models.base import Base
+from src.models import championships  # registra tabelas sem expor CRUD genérico
 from src.models.entities import (
     EventPresence,
     EventTeam,

@@ -3,6 +3,7 @@ from uuid import UUID
 from src.helpers.trophies import CATEGORIES, season_winners
 from src.services.trophies import TrophiesService
 from src.schemas.trophies import TrophyCollection, TrophyCount, TrophySchema
+from src.helpers.championship_trophies import CATEGORIES as CHAMPIONSHIP_CATEGORIES
 
 
 async def award_season(db, group, season):
@@ -26,9 +27,11 @@ async def my_trophies(profile, db):
         for season in await service.archived_seasons(group.id):
             await award_season(db, group, season)
     trophies = [TrophySchema.model_validate(row) for row in await service.profile_awards(profile.id)]
+    trophies.extend(TrophySchema.model_validate(row) for row in await service.championship_awards(profile.id))
+    trophies.sort(key=lambda row: (-row.awarded_at.timestamp(), row.title, str(row.id)))
     counts = Counter(row.category for row in trophies)
     result = TrophyCollection(total=len(trophies), trophies=trophies,
         summary=[TrophyCount(category=key, name=name, count=counts[key])
-                 for key, name in CATEGORIES.items() if counts[key]])
+                 for key, name in (CATEGORIES | CHAMPIONSHIP_CATEGORIES).items() if counts[key]])
     await service.commit()
     return result

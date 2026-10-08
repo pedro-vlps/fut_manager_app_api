@@ -20,6 +20,7 @@ from src.routers.seasons import router as seasons_router
 from src.routers.trophies import router as trophies_router
 from src.routers.scheduling import router as scheduling_router
 from src.routers.draw import router as draw_router
+from src.routers.championships import router as championships_router
 
 
 @asynccontextmanager
@@ -49,6 +50,7 @@ app.include_router(seasons_router)
 app.include_router(trophies_router)
 app.include_router(scheduling_router)
 app.include_router(draw_router)
+app.include_router(championships_router)
 app.include_router(lifecycle_router)
 
 for crud_model in CRUD_MODELS:
