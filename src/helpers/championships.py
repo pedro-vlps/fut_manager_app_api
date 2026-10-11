@@ -3,8 +3,17 @@ from itertools import combinations
 from src.schemas.championships import Standing
 
 
-def initial_fixtures(entries, format):
+def initial_fixtures(entries, format, home_and_away=False):
     ids = [e.club_id for e in entries]
+    if format == "league":
+        fixtures = []
+        for round in range(1, len(ids)):
+            fixtures.extend(("league", round, None, ids[i], ids[-i - 1]) for i in range(len(ids) // 2))
+            ids = [ids[0], ids[-1], *ids[1:-1]]
+        if home_and_away:
+            fixtures.extend([(stage, round + len(ids) - 1, pool, away, home)
+                             for stage, round, pool, home, away in fixtures])
+        return fixtures
     if format == "cascade":
         if len(ids) != 4:
             raise ValueError("Cascata permite somente 4 times.")
@@ -40,14 +49,17 @@ def cascade_next(matches):
     return []
 
 
-def standings(entries, matches):
+def standings(entries, matches, general=False):
     seeds = {e.club_id: e.seed for e in entries}
     rows = {}
+    if general:
+        rows = {e.club_id: Standing(club_id=e.club_id, pool="", played=0, points=0,
+                    goals_for=0, goals_against=0, seed=e.seed) for e in entries}
     for match in matches:
-        if match.stage != "groups":
+        if not general and match.stage not in ("groups", "league"):
             continue
         for club_id in (match.home_id, match.away_id):
-            rows.setdefault(club_id, Standing(club_id=club_id, pool=match.pool,
+            rows.setdefault(club_id, Standing(club_id=club_id, pool=match.pool or "",
                 played=0, points=0, goals_for=0, goals_against=0, seed=seeds[club_id]))
         if match.home_score is None:
             continue
@@ -58,7 +70,10 @@ def standings(entries, matches):
             row.goals_for += scored
             row.goals_against += conceded
             row.points += 3 if scored > conceded else 1 if scored == conceded else 0
-    return sorted(rows.values(), key=lambda r: (r.pool, -r.points, -(r.goals_for - r.goals_against), -r.goals_for, r.seed))
+            row.wins += int(scored > conceded)
+            row.draws += int(scored == conceded)
+            row.losses += int(scored < conceded)
+    return sorted(rows.values(), key=lambda r: (r.pool, -r.points, -r.wins, -r.draws, r.losses, -r.goals_for, r.seed))
 
 
 def qualified_pairs(entries, matches):

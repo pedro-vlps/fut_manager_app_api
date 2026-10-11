@@ -41,6 +41,38 @@ class SeasonsTests(unittest.IsolatedAsyncioTestCase):
             self.db.add(GameAction(match_id=match.id, team_id=a.id, player_id=self.user.id, action_type=GameActionType.GOAL))
         await self.db.flush()
 
+    async def test_standings_rollover_resets_and_awards_champion_once(self):
+        from sqlalchemy import select
+        from src.models.entities import SeasonTrophy
+        await self.setup_group(True)
+        now = datetime.now(timezone.utc)
+        season = GroupSeason(group_id=self.group.id, number=1,
+                             starts_at=now-timedelta(hours=23), ends_at=now+timedelta(hours=1))
+        self.db.add(season)
+        await self.db.flush()
+        await self.scored_match(now-timedelta(hours=2), 2)
+        first = await self.client.get(self.base+'/standings', headers=self.headers)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(first.json()[0]['points'], 3)
+        season.ends_at = now-timedelta(hours=1)
+        await self.db.flush()
+        reset = await self.client.get(self.base+'/standings', headers=self.headers)
+        self.assertEqual(reset.status_code, 200, reset.text)
+        self.assertEqual(reset.json(), [])
+        awards = (await self.db.scalars(select(SeasonTrophy).where(
+            SeasonTrophy.season_id == season.id, SeasonTrophy.category == 'season_champion'))).all()
+        self.assertEqual(len(awards), 1)
+        self.assertEqual((awards[0].profile_id, awards[0].value), (self.user.id, 3))
+        self.assertEqual(awards[0].title, 'Campeão da temporada - Temporada 1 - Temporadas teste')
+        await self.client.get(self.base+'/standings', headers=self.headers)
+        again = (await self.db.scalars(select(SeasonTrophy).where(
+            SeasonTrophy.season_id == season.id, SeasonTrophy.category == 'season_champion'))).all()
+        self.assertEqual(len(again), 1)
+        await self.scored_match(now, 1)
+        current = await self.client.get(self.base+'/standings', headers=self.headers)
+        self.assertEqual(current.json()[0]['matches'], 1)
+        self.assertEqual(current.json()[0]['goals'], 1)
+
     async def test_rollover_boundaries_history_snapshots_and_group_isolation(self):
         await self.setup_group(True)
         now = datetime.now(timezone.utc)

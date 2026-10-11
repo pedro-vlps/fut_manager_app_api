@@ -7,7 +7,7 @@ from src.models.enums import EventStatus, GroupRole, PresenceStatus, TeamPlayerR
 from src.schemas.presences import EventPresenceSchema
 from src.schemas.events import PeladaEventSchema
 from src.schemas.groups import PeladaGroupSchema
-from src.schemas.groups import EventOverview, GroupOverview, Person, RankingEntry
+from src.schemas.groups import EventOverview, GroupOverview, Person, ConfirmedPerson, RankingEntry
 from src.services.groups import GroupsService
 from src.helpers.groups import registration_error
 
@@ -54,6 +54,7 @@ async def overview(group: PeladaGroup, profile: Profile, db: AsyncSession):
             my_presence=(
                 EventPresenceSchema.model_validate(presence) if presence else None
             ),
+            can_cancel_confirmation=already and event.status not in [EventStatus.FINISHED, EventStatus.CANCELLED],
             can_confirm=not reason and (not already),
             can_change_role=not reason and already and event.min_confirmed_goalkeepers is not None,
             confirmation_message=reason,
@@ -122,12 +123,34 @@ async def confirm(
     return result
 
 
-async def confirmed(event_id: UUID, group: PeladaGroup, db: AsyncSession):
+async def cancel_confirmation(event_id: UUID, group: PeladaGroup, profile: Profile, db: AsyncSession):
     service = GroupsService(db)
-    await group_event(db, group.id, event_id)
+    event = await group_event(db, group.id, event_id, lock=True)
+    if event.status in [EventStatus.FINISHED, EventStatus.CANCELLED]:
+        raise HTTPException(409, "Este evento está encerrado e é somente para consulta.")
+    presence = await service.profile_presence(event, profile)
+    if presence is None:
+        raise HTTPException(404, "Você não tem uma confirmação neste evento.")
+    if presence.status not in [PresenceStatus.CONFIRMED, PresenceStatus.WAITLIST, PresenceStatus.CANCELLED]:
+        raise HTTPException(409, "Você não está na lista de confirmados ou de espera.")
+    presence.status = PresenceStatus.CANCELLED
+    presence.confirmed_at = None
+    presence.waitlist_position = None
+    await service.flush()
+    await service.rebalance_after_withdrawal(event)
+    await service.refresh(presence)
+    result = EventPresenceSchema.model_validate(presence)
+    await service.commit()
+    return result
+
+
+async def confirmed(event_id: UUID, group: PeladaGroup, profile: Profile, db: AsyncSession):
+    service = GroupsService(db)
+    event = await group_event(db, group.id, event_id)
     rows = await service.confirmed_people(event_id)
     return [
-        Person(
+        ConfirmedPerson(
+            can_cancel_confirmation=p.profile_id == profile.id and event.status not in [EventStatus.FINISHED, EventStatus.CANCELLED],
             id=p.profile_id or p.guest_id,
             name=name or guest_name,
             is_guest=p.guest_id is not None,

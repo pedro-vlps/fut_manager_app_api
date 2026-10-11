@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import aliased
 from src.models.entities import (
@@ -11,7 +12,7 @@ from src.models.entities import (
     PeladaEvent,
     Profile,
 )
-from src.models.enums import EventStatus, MembershipStatus, MatchStatus, PresenceStatus
+from src.models.enums import EventStatus, MembershipStatus, MatchStatus, PresenceStatus, TeamPlayerRole
 from src.services.base import DatabaseService
 
 
@@ -92,6 +93,31 @@ class GroupsService(DatabaseService):
         return await self.db.execute(
             text("SELECT rebalance_event_waitlist(:event_id)"), {"event_id": event.id}
         )
+
+    async def rebalance_after_withdrawal(self, event):
+        if await self.has_waitlist_trigger():
+            await self.rebalance_waitlist(event)
+            return
+        queue = await self.waiting_presences(event)
+        separate = event.min_confirmed_goalkeepers is not None
+        roles = [TeamPlayerRole.PLAYER, TeamPlayerRole.GOALKEEPER] if separate else [None]
+        for role in roles:
+            count = await self.confirmed_count(event, role)
+            capacity = event.max_confirmed_goalkeepers if role == TeamPlayerRole.GOALKEEPER else event.max_confirmed_players
+            for person in queue:
+                if role is not None and person.role != role:
+                    continue
+                if capacity is None or count < capacity:
+                    person.status = PresenceStatus.CONFIRMED
+                    person.confirmed_at = datetime.now(timezone.utc)
+                    person.waitlist_position = None
+                    count += 1
+        for person in queue:
+            person.waitlist_position = None
+        await self.flush()
+        for position, person in enumerate((p for p in queue if p.status == PresenceStatus.WAITLIST), 1):
+            person.waitlist_position = position
+        await self.flush()
 
     async def waiting_presences(self, event):
         return (

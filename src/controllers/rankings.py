@@ -3,6 +3,7 @@ from src.models.entities import PeladaGroup
 from src.models.enums import TeamPlayerRole
 from src.schemas.groups import RankingEntry
 from src.services.groups import GroupsService
+from src.helpers.trophies import standings_key
 
 
 async def calculate_rankings(group: PeladaGroup, db: AsyncSession, season=None, event_id=None):
@@ -33,6 +34,8 @@ async def calculate_rankings(group: PeladaGroup, db: AsyncSession, season=None, 
         person = entry(lineup.profile_id, lineup.guest_id, name, guest_name)
         person.matches += 1
         person.wins += int(result == "win")
+        person.draws += int(result == "draw")
+        person.points += 3 if result == "win" else 1 if result == "draw" else 0
         person.losses += int(result == "loss")
         if lineup.role == TeamPlayerRole.GOALKEEPER:
             person.goals_conceded += goals
@@ -40,3 +43,16 @@ async def calculate_rankings(group: PeladaGroup, db: AsyncSession, season=None, 
     return sorted(
         entries.values(), key=lambda p: (-p.goals, p.name.casefold(), str(p.id))
     )
+
+
+async def general_standings(group: PeladaGroup, db: AsyncSession):
+    from src.controllers.seasons import synchronize
+    from src.services.seasons import SeasonsService
+
+    service = SeasonsService(db)
+    group, season = await synchronize(service, group.id)
+    rows = await calculate_rankings(group, db, season)
+    result = sorted((p for p in rows if p.matches > 0),
+                    key=lambda p: (*standings_key(p.model_dump()), p.name.casefold(), str(p.id)))
+    await service.commit()
+    return result

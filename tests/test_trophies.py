@@ -33,6 +33,22 @@ class TrophyWinnersTests(unittest.TestCase):
         rows[1]['goals'] = 5
         self.assertIn(('goals', 'a', 5), list(season_winners(rows)))
 
+    def test_champion_uses_all_tiebreakers_and_shares_complete_ties(self):
+        rows = [dict(id='winner', matches=4, points=4, wins=1, draws=1, losses=1, goals=3),
+                dict(id='tied', matches=4, points=4, wins=1, draws=1, losses=1, goals=3),
+                dict(id='goals', matches=4, points=4, wins=1, draws=1, losses=1, goals=2),
+                dict(id='losses', matches=4, points=4, wins=1, draws=1, losses=2, goals=9),
+                dict(id='draws', matches=4, points=4, wins=1, draws=0, losses=0, goals=9),
+                dict(id='wins', matches=4, points=4, wins=0, draws=4, losses=0, goals=9),
+                dict(id='points', matches=4, points=3, wins=1, draws=0),
+                dict(id='no_games', matches=0, points=100)]
+        champions = [award for award in season_winners(rows) if award[0] == 'season_champion']
+        self.assertEqual(champions, [('season_champion', 'winner', 4), ('season_champion', 'tied', 4)])
+        rows[0]['is_guest'] = rows[1]['is_guest'] = True
+        self.assertFalse(any(c == 'season_champion' for c, _, _ in season_winners(rows)))
+        self.assertIn(('season_champion', 'zero', 0), list(season_winners([
+            dict(id='zero', matches=1, losses=1)])))
+
 
 class TrophyIntegrationTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = AuthTestCase.asyncSetUp
@@ -98,8 +114,8 @@ class TrophyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         headers = {'Authorization':'Bearer ' + (await self.login()).json()['access_token']}
         first = await self.client.get('/auth/me/trophies', headers=headers)
         self.assertEqual(first.status_code, 200, first.text)
-        self.assertEqual(first.json()['total'], 2)
-        self.assertEqual({t['category'] for t in first.json()['trophies']}, {'goals','wins'})
+        self.assertEqual(first.json()['total'], 3)
+        self.assertEqual({t['category'] for t in first.json()['trophies']}, {'goals','wins','season_champion'})
         self.assertIsNotNone(season.archived_rankings)
         second = (await self.client.get('/auth/me/trophies', headers=headers)).json()
         self.assertEqual(second, first.json())

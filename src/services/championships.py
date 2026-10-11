@@ -20,7 +20,8 @@ class ChampionshipsService(DatabaseService):
     async def statistics(self, championship_id):
         return (await self.db.scalars(select(ChampionshipStatistic).join(ChampionshipMatch,
             ChampionshipMatch.id == ChampionshipStatistic.match_id)
-            .where(ChampionshipMatch.championship_id == championship_id))).all()
+            .where(ChampionshipMatch.championship_id == championship_id,
+                   ChampionshipMatch.home_score.is_not(None), ChampionshipMatch.away_score.is_not(None)))).all()
 
     async def awards(self, championship_id):
         return (await self.db.execute(select(ChampionshipTrophy, Profile.name)

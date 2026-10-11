@@ -121,6 +121,11 @@ class LifecycleTests(AuthTestCase):
         self.assertEqual((scorer['goals'],scorer['assists'],scorer['yellow_cards'],scorer['red_cards'],scorer['wins']), (1,1,1,1,1))
         self.assertEqual(sum(p['own_goals'] for p in ranking), 1)
         self.assertTrue(any(p['is_guest'] for p in ranking))
+        table = (await self.client.get(f'/my-groups/{self.group.id}/standings', headers=self.headers)).json()
+        self.assertEqual({p['id'] for p in table}, {p['id'] for p in ranking if p['matches'] > 0})
+        self.assertTrue(all(p['points'] == 3 * p['wins'] + p['draws'] for p in table))
+        self.assertTrue(all(p['matches'] == p['wins'] + p['draws'] + p['losses'] for p in table))
+        self.assertTrue(any(p['draws'] > 0 for p in table))
 
     async def test_random_teams_random_kickoff_and_access(self):
         await self.post('/start', status=403, headers=self.other_headers)

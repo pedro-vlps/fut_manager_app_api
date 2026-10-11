@@ -17,13 +17,16 @@ class NamedInput(Input):
 class ChampionshipCreate(NamedInput):
     season: Name
     description: str | None = Field(default=None, max_length=2000)
-    format: Literal["groups_knockout", "knockout", "cascade"]
+    format: Literal["groups_knockout", "knockout", "cascade", "league"]
     capacity: Literal[4, 8, 16]
+    home_and_away: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def cascade_capacity(self):
         if self.format == "cascade" and self.capacity != 4:
             raise ValueError("Cascata permite somente 4 times.")
+        if self.home_and_away and self.format != "league":
+            raise ValueError("Ida e volta está disponível somente para ligas.")
         return self
 
 
@@ -61,6 +64,11 @@ class MatchActionInput(Input):
     action_type: Literal['goal', 'assist', 'own_goal', 'yellow_card', 'red_card']
 
 
+class MatchGoalkeepers(Input):
+    home_goalkeeper_id: UUID | None = None
+    away_goalkeeper_id: UUID | None = None
+
+
 class MatchActionView(MatchActionInput):
     player_name: str
     minute: int | None = None
@@ -95,6 +103,7 @@ class ChampionshipView(BaseModel):
     owner_id: UUID
     format: str
     capacity: int
+    home_and_away: bool = False
     status: str
     champion_id: UUID | None
 
@@ -119,6 +128,8 @@ class MatchView(BaseModel):
     home_score: int | None
     away_score: int | None
     winner_id: UUID | None
+    home_goalkeeper_id: UUID | None = None
+    away_goalkeeper_id: UUID | None = None
     statistics_complete: bool
     actions: list[MatchActionView] = Field(default_factory=list)
 
@@ -130,6 +141,12 @@ class PlayerRanking(BaseModel):
     goals: int = 0
     assists: int = 0
     own_goals: int = 0
+    yellow_cards: int = 0
+    red_cards: int = 0
+    losses: int = 0
+    goals_conceded: int = 0
+    matches: int = 0
+    goalkeeper_matches: int = 0
 
 
 class ChampionshipAward(TrophySchema):
@@ -145,12 +162,16 @@ class Standing(BaseModel):
     goals_for: int
     goals_against: int
     seed: int
+    wins: int = 0
+    draws: int = 0
+    losses: int = 0
 
 
 class ChampionshipDetail(ChampionshipView):
     entries: list[EntryView]
     matches: list[MatchView]
     standings: list[Standing]
+    general_standings: list[Standing]
     player_rankings: list[PlayerRanking]
     statistics_complete: bool
     trophies: list[ChampionshipAward]

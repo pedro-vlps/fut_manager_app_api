@@ -28,7 +28,8 @@ class Championship(UUIDTimestampMixin, Base):
         UniqueConstraint("code", name="championships_code_unique"),
         CheckConstraint("capacity IN (4, 8, 16)", name="championship_capacity"),
         CheckConstraint("format <> 'cascade' OR capacity = 4", name="cascade_four_teams"),
-        CheckConstraint("format IN ('groups_knockout', 'knockout', 'cascade')", name="championship_format"),
+        CheckConstraint("format IN ('groups_knockout', 'knockout', 'cascade', 'league')", name="championship_format"),
+        CheckConstraint("NOT home_and_away OR format = 'league'", name="league_home_and_away"),
         CheckConstraint("status IN ('registration', 'in_progress', 'finished')", name="championship_status"),
     )
     code: Mapped[str] = mapped_column(String(6), server_default=FetchedValue(), nullable=False)
@@ -38,6 +39,7 @@ class Championship(UUIDTimestampMixin, Base):
     owner_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"))
     format: Mapped[str] = mapped_column(String(24))
     capacity: Mapped[int] = mapped_column(Integer)
+    home_and_away: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     status: Mapped[str] = mapped_column(String(16), default="registration")
     champion_id: Mapped[UUID | None] = mapped_column(ForeignKey("clubs.id"))
 
@@ -73,6 +75,8 @@ class ChampionshipMatch(UUIDTimestampMixin, Base):
     home_score: Mapped[int | None] = mapped_column(Integer)
     away_score: Mapped[int | None] = mapped_column(Integer)
     winner_id: Mapped[UUID | None] = mapped_column(ForeignKey("clubs.id"))
+    home_goalkeeper_id: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    away_goalkeeper_id: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
     statistics_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     actions: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
 

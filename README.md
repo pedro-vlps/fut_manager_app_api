@@ -181,6 +181,53 @@ Profile ──< GroupMember >── PeladaGroup ──< PeladaEvent
 
 ### Área autenticada do grupo
 
+Os `player_rankings` dos campeonatos incluem gols, assistências, gols contra,
+derrotas, cartões amarelos e vermelhos, partidas, gols sofridos e partidas como
+goleiro. Somente jogos finalizados contam; cartões vêm da súmula salva. O elenco
+inscrito recebe o resultado pelo placar, preservando empates mesmo no mata-mata.
+`POST /championships/{championship_id}/matches/{match_id}/goalkeepers` permite ao
+organizador indicar `home_goalkeeper_id` e `away_goalkeeper_id` (ou `null`) antes
+de finalizar. Os jogadores precisam pertencer ao elenco do próprio time. Não
+permite alterar jogos encerrados. Aplique `023_championship_goalkeepers.sql` em
+bancos existentes; partidas antigas sem goleiro indicado não têm essa informação
+inferida pelo perfil atual. Os demais rankings usam os resultados e súmulas existentes.
+
+`GET /my-groups/{group_id}/standings` retorna a classificação geral da temporada atual dos
+jogadores e convidados. Com temporadas desativadas, acumula todas as partidas. Somente partidas finalizadas
+de eventos não cancelados contam, com a escalação ativa da partida. Vitória vale
+3 pontos, empate vale 1 e derrota vale 0. Desempates: mais vitórias, mais empates,
+menos derrotas e mais gols individuais marcados. Empates completos dividem a posição
+no app; nome e ID estabilizam a ordem de exibição.
+
+Campeonatos aceitam também `format: "league"`, com 4, 8 ou 16 times. Todos se
+enfrentam em jogo único (`home_and_away: false`, padrão) ou ida e volta
+(`home_and_away: true`), distribuídos em rodadas. Ida e volta é exclusiva de ligas
+e inverte os mandos no returno; 16 times geram 30 rodadas e 240 jogos.
+Ao confirmar todos os resultados de ambos os turnos,
+o primeiro e o segundo colocados recebem os títulos de campeão e vice. A resposta
+do campeonato inclui `general_standings`, uma tabela de todos os times em todas as
+fases, com os mesmos pontos e desempates (gols do time); a ordem de inscrição resolve
+empates completos. Placares iguais contam como empate mesmo em jogos eliminatórios.
+A classificação dos grupos também segue esses critérios.
+
+Para criar uma edição local com 16 times fictícios, 32 jogadores e os 120 jogos
+das 15 rodadas simulados, execute no ambiente da API:
+`PYTHONPATH=. python scripts/simulate_demo_league.py --owner-email IDENTIDADE_DE_DEMONSTRACAO_PRIVADA`.
+O script registra súmulas, gols e assistências, encerra o campeonato e distribui
+os troféus usando os controllers da aplicação. A execução é atômica e repetir
+o comando reutiliza a mesma demonstração concluída. A simulação começa pela
+rodada 15 para verificar que rodadas anteriores não bloqueiam outros jogos.
+Adicione `--home-and-away` ao comando para criar uma nova demonstração em ida e
+volta: as primeiras 15 rodadas são simuladas, e as rodadas 16 a 30 ficam pendentes,
+sem campeão ou troféus antecipados.
+
+Em bancos existentes, aplique `src/databases/scripts/migrations/021_league_championships.sql`
+antes de criar uma liga. O ambiente com `FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP=true`
+aplica a migration na inicialização.
+Para a opção de ida e volta, aplique também
+`src/databases/scripts/migrations/022_league_home_and_away.sql`; ela é idempotente
+e mantém todas as edições existentes em jogo único.
+
 As rotas `/my-groups/{group_id}` exigem a sessão Bearer do login e validam
 que a conta é criadora do grupo ou membro ativo:
 
@@ -497,3 +544,14 @@ O script é transacional e destinado apenas à primeira criação: não o reapli
 Configure `FUT_MANAGER_DOCS_ENABLED=false` em produção para desativar `/docs`, `/redoc`, `/openapi.json` e o redirecionamento OAuth do Swagger. As rotas normais da API continuam disponíveis. A configuração é independente de `FUT_MANAGER_DEBUG` e, sem a variável, o padrão da aplicação é `false`.
 
 Para desenvolvimento, use `FUT_MANAGER_DOCS_ENABLED=true`. O Docker Compose local usa `true` por padrão e permite sobrescrever pela variável de ambiente ou pelo `.env`. Reinicie a API após alterar a configuração; no Compose, recrie o serviço com `docker compose up -d --force-recreate api`.
+
+A classificação geral dos grupos acompanha a virada de temporada. No encerramento,
+o primeiro lugar recebe o troféu Campeão da temporada, com os mesmos desempates
+da tabela. Empates em todos os critérios esportivos compartilham o troféu;
+convidados não recebem troféus nem promovem os colocados seguintes. Sem temporadas
+ativadas, a tabela acumula todas as partidas, como os demais rankings.
+
+`POST /my-groups/{group_id}/events/{event_id}/cancel-confirmation` permite que
+cada usuário retire a própria confirmação ou saia da lista de espera, mesmo após
+o prazo de inscrição. Libera a vaga e promove a fila por função, preservando
+os registros das partidas. Eventos encerrados ou cancelados são somente consulta.

@@ -14,6 +14,59 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = AuthTestCase.asyncTearDown
     login = AuthTestCase.login
 
+    async def test_home_and_away_only_finishes_after_both_legs(self):
+        await self.setup_api()
+        payload = dict(name='Liga ida e volta', season='2026', capacity=4, format='league', home_and_away=True)
+        for format in ('knockout', 'groups_knockout', 'cascade'):
+            invalid = await self.client.post('/championships', headers=self.headers, json={**payload, 'format': format})
+            self.assertEqual(invalid.status_code, 422, invalid.text)
+        response = await self.client.post('/championships', headers=self.headers, json=payload)
+        self.assertEqual(response.status_code, 201, response.text)
+        cup = response.json()
+        self.assertTrue(cup['home_and_away'])
+        await self.fill_cup(cup)
+        base = f"/championships/{cup['id']}"
+        data = (await self.client.post(base + '/start', headers=self.headers)).json()
+        self.assertEqual(len(data['matches']), 12)
+        self.assertEqual({m['round'] for m in data['matches']}, set(range(1, 7)))
+        # Confirmar o primeiro turno não pode definir campeão nem distribuir troféus.
+        for match in data['matches']:
+            response = await self.client.post(base + f"/matches/{match['id']}/score", headers=self.headers,
+                json=dict(home_score=0, away_score=0, action_ids=[]))
+            self.assertEqual(response.status_code, 200, response.text)
+            data = response.json()
+            if match['sequence'] == 6:
+                self.assertEqual(data['status'], 'in_progress')
+                self.assertIsNone(data['champion_id'])
+                self.assertEqual(data['trophies'], [])
+                self.assertTrue(all(row['played'] == 3 for row in data['general_standings']))
+        self.assertEqual(data['status'], 'finished')
+        self.assertEqual(data['champion_id'], data['general_standings'][0]['club_id'])
+        self.assertTrue(all(row['played'] == 6 for row in data['general_standings']))
+        self.assertTrue(data['trophies'])
+
+
+    async def test_league_allows_actions_and_results_in_later_rounds_first(self):
+        await self.setup_api()
+        cup = await self.create_cup(format='league')
+        await self.fill_cup(cup)
+        base = f"/championships/{cup['id']}"
+        data = (await self.client.post(base + '/start', headers=self.headers)).json()
+        match = data['matches'][-1]
+        self.assertEqual(match['round'], 3)
+        home = next(e for e in data['entries'] if e['club_id'] == match['home_id'])
+        action = dict(id=str(uuid4()), team_id=home['club_id'], presence_id=home['players'][0]['id'], action_type='goal')
+        url = base + f"/matches/{match['id']}"
+        response = await self.client.post(url + '/actions', headers=self.headers, json=action)
+        self.assertEqual(response.status_code, 200, response.text)
+        response = await self.client.post(url + '/score', headers=self.headers,
+            json=dict(home_score=1, away_score=0, action_ids=[action['id']]))
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data['status'], 'in_progress')
+        self.assertIsNone(data['matches'][0]['home_score'])
+        self.assertEqual(data['matches'][-1]['home_score'], 1)
+
     async def test_match_actions_persist_validate_and_drive_result(self):
         await self.setup_api()
         cup = await self.create_cup(format='cascade')
@@ -24,6 +77,12 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
         url = base + f"/matches/{match['id']}"
         home = next(e for e in data['entries'] if e['club_id'] == match['home_id'])
         away = next(e for e in data['entries'] if e['club_id'] == match['away_id'])
+        keepers = {'home_goalkeeper_id': home['players'][1]['id'], 'away_goalkeeper_id': away['players'][1]['id']}
+        self.assertEqual((await self.client.post(url + '/goalkeepers', json=keepers)).status_code, 401)
+        self.assertEqual((await self.client.post(url + '/goalkeepers', headers=self.other_headers, json=keepers)).status_code, 403)
+        self.assertEqual((await self.client.post(url + '/goalkeepers', headers=self.headers,
+            json={**keepers, 'home_goalkeeper_id': away['players'][0]['id']})).status_code, 422)
+        self.assertEqual((await self.client.post(url + '/goalkeepers', headers=self.headers, json=keepers)).status_code, 200)
         goal = dict(id=str(uuid4()), team_id=home['club_id'], presence_id=home['players'][0]['id'], action_type='goal')
         self.assertEqual((await self.client.post(url + '/actions', json=goal)).status_code, 401)
         self.assertEqual((await self.client.post(url + '/actions', headers=self.other_headers, json=goal)).status_code, 403)
@@ -44,6 +103,8 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
         saved = (await self.client.get(base, headers=self.other_headers)).json()['matches'][0]
         self.assertEqual([a['id'] for a in saved['actions']], [a['id'] for a in events])
         self.assertIsNone(saved['home_score'])
+        pending_rankings = (await self.client.get(base, headers=self.headers)).json()['player_rankings']
+        self.assertTrue(all(p['matches'] == p['yellow_cards'] == p['red_cards'] == p['goals_conceded'] == 0 for p in pending_rankings))
         removal = url + f"/actions/{events[-1]['id']}/remove"
         self.assertEqual((await self.client.post(removal, headers=self.other_headers)).status_code, 403)
         for _ in range(2):
@@ -61,6 +122,14 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ranking[home['players'][0]['id']]['goals'], 1)
         self.assertEqual(ranking[home['players'][1]['id']]['assists'], 1)
         self.assertEqual(ranking[away['players'][0]['id']]['own_goals'], 1)
+        self.assertEqual(ranking[home['players'][0]['id']]['yellow_cards'], 1)
+        self.assertEqual(ranking[home['players'][1]['id']]['goalkeeper_matches'], 1)
+        self.assertEqual(ranking[home['players'][1]['id']]['goals_conceded'], 0)
+        self.assertEqual(ranking[away['players'][1]['id']]['goals_conceded'], 2)
+        self.assertEqual(ranking[away['players'][1]['id']]['goalkeeper_matches'], 1)
+        self.assertEqual(ranking[away['players'][0]['id']]['losses'], 1)
+        self.assertEqual(ranking[away['players'][1]['id']]['red_cards'], 0)
+        self.assertEqual((await self.client.post(url + '/goalkeepers', headers=self.headers, json=keepers)).status_code, 409)
         self.assertEqual((await self.client.post(url + '/actions', headers=self.headers, json={**goal, 'id': str(uuid4())})).status_code, 409)
         self.assertEqual((await self.client.post(removal, headers=self.headers)).status_code, 409)
 
@@ -204,7 +273,7 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_sizes_and_formats_complete_with_correct_match_counts(self):
         await self.setup_api()
         for capacity in [4, 8, 16]:
-            for format in ['knockout', 'groups_knockout']:
+            for format in ['knockout', 'groups_knockout', 'league']:
                 cup = await self.create_cup(capacity, format)
                 base = f"/championships/{cup['id']}"
                 self.assertEqual((await self.client.post(base + '/start', headers=self.headers)).status_code, 409)
@@ -226,10 +295,19 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(response.status_code, 200, response.text)
                     data = response.json()
                     self.assertEqual((await self.client.post(url, headers=self.headers, json=payload)).status_code, 409)
-                expected = capacity - 1 if format == 'knockout' else capacity // 4 * 6 + capacity // 2 - 1
+                expected = capacity * (capacity - 1) // 2 if format == 'league' else capacity - 1 if format == 'knockout' else capacity // 4 * 6 + capacity // 2 - 1
                 self.assertEqual(len(data['matches']), expected)
                 self.assertIsNotNone(data['champion_id'])
-                self.assertEqual(data['champion_id'], data['matches'][-1]['winner_id'])
+                if format == 'league':
+                    table = data['general_standings']
+                    self.assertEqual(data['champion_id'], table[0]['club_id'])
+                    self.assertTrue(all(row['points'] == capacity - 1 and row['draws'] == capacity - 1 for row in table))
+                    self.assertTrue(all(m['winner_id'] is None and m['stage'] == 'league' for m in data['matches']))
+                    for category, team in [('championship_champion', table[0]['club_id']), ('championship_runner_up', table[1]['club_id'])]:
+                        players = next(e['players'] for e in data['entries'] if e['club_id'] == team)
+                        self.assertEqual({a['profile_id'] for a in data['trophies'] if a['category'] == category}, {p['id'] for p in players})
+                else:
+                    self.assertEqual(data['champion_id'], data['matches'][-1]['winner_id'])
 
     async def test_capacity_validation_scope_and_cascade_guard(self):
         await self.setup_api()
@@ -257,7 +335,7 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BracketTests(unittest.TestCase):
-    def test_groups_advance_crossed_by_points_balance_goals_and_seed(self):
+    def test_groups_advance_crossed_and_seed_breaks_identical_results(self):
         entries = [SimpleNamespace(club_id=i, seed=i + 1) for i in range(8)]
         # UUIDs reais para validação de Standing.
         for entry in entries:

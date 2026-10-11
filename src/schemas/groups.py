@@ -66,6 +66,7 @@ class EventOverview(PeladaEventSchema):
     my_presence: EventPresenceSchema | None
     can_confirm: bool
     can_change_role: bool = False
+    can_cancel_confirmation: bool = False
     confirmation_message: str | None
 
 
@@ -82,6 +83,10 @@ class Person(BaseModel):
     is_guest: bool = False
 
 
+class ConfirmedPerson(Person):
+    can_cancel_confirmation: bool = False
+
+
 class RankingEntry(Person):
     goals: int = 0
     own_goals: int = 0
@@ -89,6 +94,8 @@ class RankingEntry(Person):
     yellow_cards: int = 0
     red_cards: int = 0
     wins: int = 0
+    draws: int = 0
+    points: int = 0
     losses: int = 0
     goals_conceded: int = 0
     matches: int = 0

@@ -6,11 +6,20 @@ from src.models.entities import PeladaGroup, Profile
 from src.schemas.presences import EventPresenceSchema, ConfirmRequest
 from src.schemas.events import PeladaEventSchema
 from src.schemas.member_profile import MemberProfile
-from src.schemas.groups import GroupOverview, Person, RankingEntry
+from src.schemas.groups import GroupOverview, Person, ConfirmedPerson, RankingEntry
 from src.controllers import groups as controller
+from src.controllers.rankings import general_standings as calculate_standings
 from src.routers.dependencies import current_profile, accessible_group
 
 router = APIRouter(prefix="/my-groups", tags=["Área do grupo"])
+
+
+@router.get("/{group_id}/standings", response_model=list[RankingEntry])
+async def general_standings(
+    group: PeladaGroup = Depends(accessible_group),
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await calculate_standings(group, db)
 
 
 @router.get("/{group_id}/events/{event_id}/rankings", response_model=list[RankingEntry])
@@ -44,13 +53,24 @@ async def confirm(
     return await controller.confirm(event_id, group, profile, db, payload.role)
 
 
-@router.get("/{group_id}/events/{event_id}/confirmed", response_model=list[Person])
+@router.post("/{group_id}/events/{event_id}/cancel-confirmation", response_model=EventPresenceSchema)
+async def cancel_confirmation(
+    event_id: UUID,
+    group: PeladaGroup = Depends(accessible_group),
+    profile: Profile = Depends(current_profile),
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await controller.cancel_confirmation(event_id, group, profile, db)
+
+
+@router.get("/{group_id}/events/{event_id}/confirmed", response_model=list[ConfirmedPerson])
 async def confirmed(
     event_id: UUID,
     group: PeladaGroup = Depends(accessible_group),
+    profile: Profile = Depends(current_profile),
     db: AsyncSession = Depends(get_db_session),
 ):
-    return await controller.confirmed(event_id, group, db)
+    return await controller.confirmed(event_id, group, profile, db)
 
 
 @router.get("/{group_id}/history", response_model=list[PeladaEventSchema])
