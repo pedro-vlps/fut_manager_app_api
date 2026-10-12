@@ -574,3 +574,25 @@ Os nomes das variáveis fazem parte do contrato da aplicação; seus valores sã
 A revisão automática `python scripts/check_private_config.py` rejeita arquivos
 privados, endpoints de implantação e credenciais fixas antes de publicar.
 O workflow do GitHub repete essa revisão e usa Gitleaks com saída redigida.
+
+## Grupos definidos pelo organizador e campeonato de 12 times
+
+Grupos + mata-mata aceita 4, 8, 12 e 16 times. Com 12 times, são quatro
+grupos de três em turno único: 12 jogos na fase de grupos. Apenas o líder
+de cada grupo avança, com semifinais A × B e C × D e uma final (15 jogos).
+As outras capacidades mantêm grupos de quatro e duas vagas por grupo.
+
+`POST /championships/{id}/groups` recebe `groups`, uma lista de listas de IDs
+dos times, na ordem A, B, C, D. Exige todas as vagas preenchidas, grupos do
+tamanho correto e cada time inscrito exatamente uma vez. Somente o organizador
+pode editar, antes de registrar qualquer resultado, lance ou goleiro.
+A divisão pode ser corrigida após iniciar, enquanto os jogos ainda não têm
+registros; os confrontos pendentes são recriados atomicamente. A ordem de
+inscrição usada no desempate e os elencos permanecem intactos.
+
+Para atualizar um banco existente, aplique a migração
+`src/databases/scripts/migrations/024_championship_groups.sql` antes de iniciar
+a API atualizada. Ela amplia a restrição de capacidade e adiciona a coluna
+opcional de grupo, preservando os dados. Com `FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP=true`,
+o bootstrap aplica a migração automaticamente. O arquivo `create_database.sql`
+atualizado é somente para bancos novos.

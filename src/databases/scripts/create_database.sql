@@ -97,6 +97,7 @@ CREATE TABLE championships (
 	owner_id UUID NOT NULL, 
 	format VARCHAR(24) NOT NULL, 
 	capacity INTEGER NOT NULL, 
+	home_and_away BOOLEAN DEFAULT false NOT NULL,
 	status VARCHAR(16) NOT NULL, 
 	champion_id UUID, 
 	id UUID NOT NULL, 
@@ -104,9 +105,11 @@ CREATE TABLE championships (
 	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
 	CONSTRAINT pk_championships PRIMARY KEY (id), 
 	CONSTRAINT championships_code_unique UNIQUE (code), 
-	CONSTRAINT ck_championships_championship_capacity CHECK (capacity IN (4, 8, 16)), 
+	CONSTRAINT ck_championships_championship_capacity CHECK (capacity IN (4, 8, 12, 16)),
+	CONSTRAINT ck_championships_twelve_teams_groups CHECK (capacity <> 12 OR format = 'groups_knockout'),
 	CONSTRAINT ck_championships_cascade_four_teams CHECK (format <> 'cascade' OR capacity = 4), 
-	CONSTRAINT ck_championships_championship_format CHECK (format IN ('groups_knockout', 'knockout', 'cascade')), 
+	CONSTRAINT ck_championships_championship_format CHECK (format IN ('groups_knockout', 'knockout', 'cascade', 'league')),
+	CONSTRAINT ck_championships_league_home_and_away CHECK (NOT home_and_away OR format = 'league'),
 	CONSTRAINT ck_championships_championship_status CHECK (status IN ('registration', 'in_progress', 'finished')), 
 	CONSTRAINT fk_championships_owner_id_profiles FOREIGN KEY(owner_id) REFERENCES profiles (id), 
 	CONSTRAINT fk_championships_champion_id_clubs FOREIGN KEY(champion_id) REFERENCES clubs (id)
@@ -235,6 +238,7 @@ CREATE TABLE championship_entries (
 	championship_id UUID NOT NULL, 
 	club_id UUID NOT NULL, 
 	seed INTEGER NOT NULL, 
+	pool VARCHAR(1),
 	id UUID NOT NULL, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
 	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
@@ -255,6 +259,8 @@ CREATE TABLE championship_matches (
 	home_score INTEGER, 
 	away_score INTEGER, 
 	winner_id UUID, 
+	home_goalkeeper_id UUID,
+	away_goalkeeper_id UUID,
 	statistics_complete BOOLEAN DEFAULT false NOT NULL, 
 	actions JSONB DEFAULT '[]'::jsonb NOT NULL, 
 	id UUID NOT NULL, 
@@ -267,7 +273,9 @@ CREATE TABLE championship_matches (
 	CONSTRAINT fk_championship_matches_championship_id_championships FOREIGN KEY(championship_id) REFERENCES championships (id) ON DELETE CASCADE, 
 	CONSTRAINT fk_championship_matches_home_id_clubs FOREIGN KEY(home_id) REFERENCES clubs (id), 
 	CONSTRAINT fk_championship_matches_away_id_clubs FOREIGN KEY(away_id) REFERENCES clubs (id), 
-	CONSTRAINT fk_championship_matches_winner_id_clubs FOREIGN KEY(winner_id) REFERENCES clubs (id)
+	CONSTRAINT fk_championship_matches_winner_id_clubs FOREIGN KEY(winner_id) REFERENCES clubs (id),
+	CONSTRAINT fk_championship_matches_home_goalkeeper_id_profiles FOREIGN KEY(home_goalkeeper_id) REFERENCES profiles (id),
+	CONSTRAINT fk_championship_matches_away_goalkeeper_id_profiles FOREIGN KEY(away_goalkeeper_id) REFERENCES profiles (id)
 );
 
 CREATE TABLE championship_trophies (
@@ -843,6 +851,51 @@ $$;
 
 -- Complemento: migrations/020_championship_actions.sql
 ALTER TABLE championship_matches ADD COLUMN IF NOT EXISTS actions JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+
+
+-- Complemento: migrations/021_league_championships.sql
+BEGIN;
+ALTER TABLE championships DROP CONSTRAINT IF EXISTS ck_championships_championship_format;
+ALTER TABLE championships ADD CONSTRAINT ck_championships_championship_format
+    CHECK (format IN ('groups_knockout', 'knockout', 'cascade', 'league'));
+COMMIT;
+
+
+
+-- Complemento: migrations/022_league_home_and_away.sql
+BEGIN;
+ALTER TABLE championships ADD COLUMN IF NOT EXISTS home_and_away BOOLEAN NOT NULL DEFAULT false;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'ck_championships_league_home_and_away'
+                   AND conrelid = 'championships'::regclass) THEN
+        ALTER TABLE championships ADD CONSTRAINT ck_championships_league_home_and_away
+            CHECK (NOT home_and_away OR format = 'league');
+    END IF;
+END $$;
+COMMIT;
+
+
+
+-- Complemento: migrations/023_championship_goalkeepers.sql
+BEGIN;
+ALTER TABLE championship_matches ADD COLUMN IF NOT EXISTS home_goalkeeper_id UUID REFERENCES profiles(id);
+ALTER TABLE championship_matches ADD COLUMN IF NOT EXISTS away_goalkeeper_id UUID REFERENCES profiles(id);
+COMMIT;
+
+
+
+-- Complemento: migrations/024_championship_groups.sql
+BEGIN;
+ALTER TABLE championships DROP CONSTRAINT IF EXISTS ck_championships_championship_capacity;
+ALTER TABLE championships ADD CONSTRAINT ck_championships_championship_capacity
+    CHECK (capacity IN (4, 8, 12, 16));
+ALTER TABLE championships DROP CONSTRAINT IF EXISTS ck_championships_twelve_teams_groups;
+ALTER TABLE championships ADD CONSTRAINT ck_championships_twelve_teams_groups
+    CHECK (capacity <> 12 OR format = 'groups_knockout');
+ALTER TABLE championship_entries ADD COLUMN IF NOT EXISTS pool VARCHAR(1);
+COMMIT;
 
 
 

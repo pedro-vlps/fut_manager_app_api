@@ -18,11 +18,13 @@ class ChampionshipCreate(NamedInput):
     season: Name
     description: str | None = Field(default=None, max_length=2000)
     format: Literal["groups_knockout", "knockout", "cascade", "league"]
-    capacity: Literal[4, 8, 16]
+    capacity: Literal[4, 8, 12, 16]
     home_and_away: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def cascade_capacity(self):
+        if self.capacity == 12 and self.format != "groups_knockout":
+            raise ValueError("12 times está disponível somente para grupos + mata-mata.")
         if self.format == "cascade" and self.capacity != 4:
             raise ValueError("Cascata permite somente 4 times.")
         if self.home_and_away and self.format != "league":
@@ -40,6 +42,10 @@ class Decision(Input):
 
 class Registration(Input):
     club_id: UUID
+
+
+class GroupAssignment(Input):
+    groups: list[list[UUID]] = Field(min_length=1, max_length=4)
 
 
 class PlayerStatistic(Input):
@@ -113,6 +119,7 @@ class EntryView(BaseModel):
     club_id: UUID
     name: str
     seed: int
+    pool: str | None = None
     players: list[Person]
 
 

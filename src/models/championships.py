@@ -26,7 +26,8 @@ class Championship(UUIDTimestampMixin, Base):
     __tablename__ = "championships"
     __table_args__ = (
         UniqueConstraint("code", name="championships_code_unique"),
-        CheckConstraint("capacity IN (4, 8, 16)", name="championship_capacity"),
+        CheckConstraint("capacity IN (4, 8, 12, 16)", name="championship_capacity"),
+        CheckConstraint("capacity <> 12 OR format = 'groups_knockout'", name="twelve_teams_groups"),
         CheckConstraint("format <> 'cascade' OR capacity = 4", name="cascade_four_teams"),
         CheckConstraint("format IN ('groups_knockout', 'knockout', 'cascade', 'league')", name="championship_format"),
         CheckConstraint("NOT home_and_away OR format = 'league'", name="league_home_and_away"),
@@ -50,6 +51,7 @@ class ChampionshipEntry(UUIDTimestampMixin, Base):
     championship_id: Mapped[UUID] = mapped_column(ForeignKey("championships.id", ondelete="CASCADE"))
     club_id: Mapped[UUID] = mapped_column(ForeignKey("clubs.id"))
     seed: Mapped[int] = mapped_column(Integer)
+    pool: Mapped[str | None] = mapped_column(String(1))
 
 
 class ChampionshipPlayer(UUIDTimestampMixin, Base):

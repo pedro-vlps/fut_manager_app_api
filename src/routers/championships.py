@@ -8,7 +8,7 @@ from src.routers.dependencies import current_profile
 from src.controllers import championships as controller
 from src.schemas.member_profile import MemberProfile
 from src.schemas.championships import (NamedInput, ChampionshipCreate, Invite, Decision, Registration, Score,
-    ClubView, InvitationView, ChampionshipView, ChampionshipDetail, CreatedGroup, ChampionshipCodeQuery, MatchActionInput, MatchGoalkeepers)
+    ClubView, InvitationView, ChampionshipView, ChampionshipDetail, CreatedGroup, ChampionshipCodeQuery, MatchActionInput, MatchGoalkeepers, GroupAssignment)
 
 router = APIRouter(tags=["Campeonatos e times"])
 User = Annotated[Profile, Depends(current_profile)]
@@ -83,6 +83,11 @@ async def withdraw(championship_id: UUID, club_id: UUID, profile: User, db: DB):
 @router.post("/championships/{championship_id}/start", response_model=ChampionshipDetail)
 async def start(championship_id: UUID, profile: User, db: DB):
     return await controller.start(championship_id, profile, db)
+
+
+@router.post("/championships/{championship_id}/groups", response_model=ChampionshipDetail)
+async def assign_groups(championship_id: UUID, payload: GroupAssignment, profile: User, db: DB):
+    return await controller.assign_groups(championship_id, payload, profile, db)
 
 
 @router.post("/championships/{championship_id}/matches/{match_id}/score", response_model=ChampionshipDetail)

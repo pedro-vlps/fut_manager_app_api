@@ -3,6 +3,15 @@ from itertools import combinations
 from src.schemas.championships import Standing
 
 
+def entry_pools(entries):
+    size = 3 if len(entries) == 12 else 4
+    pools = {}
+    for index, entry in enumerate(sorted(entries, key=lambda e: e.seed)):
+        pool = getattr(entry, "pool", None) or chr(65 + index // size)
+        pools.setdefault(pool, []).append(entry.club_id)
+    return dict(sorted(pools.items()))
+
+
 def initial_fixtures(entries, format, home_and_away=False):
     ids = [e.club_id for e in entries]
     if format == "league":
@@ -21,8 +30,8 @@ def initial_fixtures(entries, format, home_and_away=False):
     if format == "knockout":
         return [("knockout", 1, None, ids[i], ids[i + 1]) for i in range(0, len(ids), 2)]
     if format == "groups_knockout":
-        return [("groups", 1, chr(65 + i // 4), a, b)
-                for i in range(0, len(ids), 4) for a, b in combinations(ids[i:i + 4], 2)]
+        return [("groups", 1, pool, a, b)
+                for pool, clubs in entry_pools(entries).items() for a, b in combinations(clubs, 2)]
     raise ValueError("Formato inválido.")
 
 
@@ -81,6 +90,8 @@ def qualified_pairs(entries, matches):
     for row in standings(entries, matches):
         pools.setdefault(row.pool, []).append(row.club_id)
     groups = list(pools.values())
+    if len(entries) == 12:
+        return [(groups[0][0], groups[1][0]), (groups[2][0], groups[3][0])]
     if len(groups) == 1:
         return [(groups[0][0], groups[0][1])]
     return [pair for i in range(0, len(groups), 2)

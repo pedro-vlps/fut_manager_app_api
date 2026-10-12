@@ -111,6 +111,7 @@ async def detail(championship_id, profile, db):
     matches = await service.matches(championship.id)
     return ChampionshipDetail(**ChampionshipView.model_validate(championship).model_dump(),
         entries=[EntryView(id=e.id, club_id=e.club_id, name=name, seed=e.seed,
+            pool=(e.pool or chr(65 + (e.seed - 1) // (3 if championship.capacity == 12 else 4))) if championship.format == 'groups_knockout' else None,
             players=[Person(id=p.profile_id, name=n, status="accepted") for p, n in players if p.entry_id == e.id]) for e, name in entries],
         matches=[MatchView.model_validate(m) for m in matches], standings=standings([e for e, _ in entries], matches),
         general_standings=standings([e for e, _ in entries], matches, general=True),
@@ -176,6 +177,7 @@ async def withdraw(championship_id, club_id, profile, db):
         await service.flush()
         for seed, remaining in enumerate([e for e, _ in entries if e.id != entry.id], 1):
             remaining.seed = seed
+            remaining.pool = None
         await service.flush()
     result = await detail(championship.id, profile, db)
     await service.commit()
@@ -186,6 +188,38 @@ def add_matches(service, championship_id, fixtures, offset=0):
     for sequence, (stage, round, pool, home, away) in enumerate(fixtures, offset + 1):
         service.add(ChampionshipMatch(championship_id=championship_id, sequence=sequence,
             stage=stage, round=round, pool=pool, home_id=home, away_id=away))
+
+
+async def assign_groups(championship_id, payload, profile, db):
+    service = ChampionshipsService(db)
+    championship = await require_entity(service, Championship, championship_id, lock=True)
+    require_owner(championship, profile)
+    if championship.format != "groups_knockout":
+        raise HTTPException(409, "A edição de grupos está disponível somente para grupos + mata-mata.")
+    matches = await service.matches(championship.id)
+    if championship.status == "finished" or any(
+        m.home_score is not None or m.actions or m.home_goalkeeper_id or m.away_goalkeeper_id for m in matches
+    ):
+        raise HTTPException(409, "Não é possível alterar os grupos após registrar um jogo, lance ou goleiro.")
+    entries = [e for e, _ in await service.entries(championship.id)]
+    size = 3 if championship.capacity == 12 else 4
+    ids = [club for group in payload.groups for club in group]
+    if (len(entries) != championship.capacity or len(payload.groups) != championship.capacity // size
+            or any(len(group) != size for group in payload.groups)
+            or len(set(ids)) != len(ids) or set(ids) != {e.club_id for e in entries}):
+        raise HTTPException(422, f"Distribua todos os times inscritos uma única vez em grupos de {size}.")
+    assignment = {club: chr(65 + i) for i, group in enumerate(payload.groups) for club in group}
+    for entry in entries:
+        entry.pool = assignment[entry.club_id]
+    if championship.status == "in_progress":
+        for match in matches:
+            await service.delete(match)
+        await service.flush()
+        add_matches(service, championship.id, initial_fixtures(entries, championship.format))
+    await service.flush()
+    result = await detail(championship.id, profile, db)
+    await service.commit()
+    return result
 
 
 async def start(championship_id, profile, db):

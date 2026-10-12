@@ -46,3 +46,5 @@ async def create_schema() -> None:
         await raw.driver_connection.execute(home_away_sql)
         keeper_sql = (Path(__file__).parent / "migrations/023_championship_goalkeepers.sql").read_text(encoding="utf-8-sig")
         await raw.driver_connection.execute(keeper_sql)
+        groups_sql = (Path(__file__).parent / "migrations/024_championship_groups.sql").read_text(encoding="utf-8-sig")
+        await raw.driver_connection.execute(groups_sql)
