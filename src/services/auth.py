@@ -6,6 +6,19 @@ from src.services.base import DatabaseService
 
 class AuthService(DatabaseService):
 
+    @staticmethod
+    def integrity_error_details(error):
+        details = {"sqlstate": None, "constraint": None, "table": None, "column": None}
+        cause = error.orig
+        seen = set()
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            for field, attribute in [("sqlstate", "sqlstate"), ("constraint", "constraint_name"),
+                                     ("table", "table_name"), ("column", "column_name")]:
+                details[field] = details[field] or getattr(cause, attribute, None)
+            cause = cause.__cause__
+        return details
+
     async def find_profile_id_by_email(self, email):
         return await self.db.scalar(
             select(Profile.id).where(func.lower(Profile.email) == email)

@@ -2,3 +2,21 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Configurações privadas, chaves, backups e relatórios locais
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.keystore
+*.dump
+*.sql.gz
+*.sqlite
+*.sqlite3
+*.backup
+security-audit.local.json
+private-config/

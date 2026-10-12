@@ -1,8 +1,8 @@
-"""Popula um grupo existente com dados fictícios e garante o owner de demonstração.
+"""Popula um grupo existente com dados fictícios e garante acesso de demonstração ao grupo informado.
 
 Uso: FUT_MANAGER_DEMO_PASSWORD=... python -m scripts.seed_demo --group-id UUID --saturday 2026-09-26
 IDs determinísticos permitem repetir o comando sem duplicar ou resetar testes.
-A conta IDENTIDADE_DE_DEMONSTRACAO_PRIVADA recebe SENHA_DE_DEMONSTRACAO_PRIVADA e vínculo OWNER ativo em todos os grupos.
+A identidade e a senha de demonstração são fornecidas pelo ambiente privado.
 """
 
 import argparse
@@ -43,33 +43,31 @@ from src.models.enums import (
 )
 
 
-async def ensure_demo_owner(db):
-    """Garante o acesso de teste em todos os grupos sem alterar seus criadores."""
-    owner = await db.scalar(
-        select(Profile).where(func.lower(Profile.email) == os.environ["FUT_MANAGER_DEMO_OWNER_EMAIL"])
-    )
+async def ensure_demo_owner(db, group_id):
+    """Configura somente o grupo solicitado; não redefine senhas existentes."""
+    email = os.environ["FUT_MANAGER_DEMO_OWNER_EMAIL"].strip().lower()
+    if not email:
+        raise ValueError("Configure a identidade de demonstração no ambiente privado.")
+    owner = await db.scalar(select(Profile).where(func.lower(Profile.email) == email))
     if owner is None:
-        owner = Profile(name="Owner de demonstração", email=os.environ["FUT_MANAGER_DEMO_OWNER_EMAIL"],
+        owner = Profile(name="Owner de demonstração", email=email,
                         password=os.environ["FUT_MANAGER_DEMO_OWNER_PASSWORD"], is_active=True)
         db.add(owner)
         await db.flush()
-    else:
-        owner.is_active = True
-        if not owner.verify_password(os.environ["FUT_MANAGER_DEMO_OWNER_PASSWORD"]):
-            owner.password = os.environ["FUT_MANAGER_DEMO_OWNER_PASSWORD"]
-
-    groups = (await db.scalars(select(PeladaGroup).order_by(PeladaGroup.id))).all()
-    for group in groups:
-        membership = await db.scalar(select(GroupMember).where(
-            GroupMember.group_id == group.id, GroupMember.profile_id == owner.id
-        ))
-        if membership is None:
-            membership = GroupMember(group_id=group.id, profile_id=owner.id)
-            db.add(membership)
-        membership.role = GroupRole.OWNER
-        membership.status = MembershipStatus.ACTIVE
+    elif not owner.is_active:
+        raise ValueError("A conta de demonstração precisa estar ativa.")
+    group = await db.get(PeladaGroup, group_id)
+    if group is None:
+        raise ValueError("Grupo não encontrado.")
+    membership = await db.scalar(select(GroupMember).where(
+        GroupMember.group_id == group.id, GroupMember.profile_id == owner.id))
+    if membership is None:
+        membership = GroupMember(group_id=group.id, profile_id=owner.id)
+        db.add(membership)
+    membership.role = GroupRole.OWNER
+    membership.status = MembershipStatus.ACTIVE
     await db.flush()
-    return {"email": owner.email, "role": "owner", "groups": len(groups)}
+    return {"email": owner.email, "role": "owner", "groups": 1}
 
 
 async def seed(group_id: UUID, saturday: date, password: str, start_now=False, with_seasons=False):
@@ -88,7 +86,7 @@ async def seed(group_id: UUID, saturday: date, password: str, start_now=False, w
         if group is None:
             raise ValueError("Grupo não encontrado. Nenhum dado foi criado.")
 
-        owner_summary = await ensure_demo_owner(db)
+        owner_summary = await ensure_demo_owner(db, group_id)
 
         def uid(key):
             return uuid5(group_id, f"futmanager-demo-v1:{key}")

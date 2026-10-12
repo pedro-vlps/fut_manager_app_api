@@ -1,0 +1,15 @@
+name: Revisão de informações privadas
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  private-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verificar arquivos versionados
+        run: python scripts/check_private_config.py
+      - name: Procurar segredos no histórico
+        run: docker run --rm --network none -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact=100 --no-banner

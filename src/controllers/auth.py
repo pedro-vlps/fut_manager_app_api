@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 from threading import Lock
@@ -22,6 +23,8 @@ from src.schemas.auth import (
 )
 from src.services.auth import AuthService
 from src.helpers.auth import unauthorized
+
+logger = logging.getLogger(__name__)
 
 _sessions: dict[str, tuple[UUID, datetime]] = {}
 _session_lock = Lock()
@@ -54,9 +57,15 @@ async def register(payload: ProfileCreateSchema, db: AsyncSession):
     service.add(profile)
     try:
         await service.commit()
-    except IntegrityError:
+    except IntegrityError as error:
         await service.rollback()
-        raise HTTPException(409, "Já existe uma conta com este e-mail.")
+        details = service.integrity_error_details(error)
+        if details["sqlstate"] == "23505" and await service.find_profile_id_by_email(email):
+            raise HTTPException(409, "Já existe uma conta com este e-mail.") from None
+        # Do not log the SQL exception: its parameters include the password hash.
+        logger.error("Falha de integridade no cadastro: sqlstate=%s constraint=%s table=%s column=%s",
+                     details["sqlstate"], details["constraint"], details["table"], details["column"])
+        raise HTTPException(500, "Não foi possível criar a conta. Tente novamente mais tarde.") from None
     await service.refresh(profile)
     return profile
 

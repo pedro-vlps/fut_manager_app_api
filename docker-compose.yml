@@ -11,11 +11,11 @@ services:
       FUT_MANAGER_APP_NAME: Fut Manager API
       FUT_MANAGER_DEBUG: "false"
       FUT_MANAGER_DOCS_ENABLED: "${FUT_MANAGER_DOCS_ENABLED:-true}"
-      FUT_MANAGER_DATABASE_HOST: ${FUT_MANAGER_DATABASE_HOST}
-      FUT_MANAGER_DATABASE_PORT: ${FUT_MANAGER_DATABASE_PORT}
-      FUT_MANAGER_DATABASE_NAME: ${FUT_MANAGER_DATABASE_NAME}
-      FUT_MANAGER_DATABASE_USER: ${FUT_MANAGER_DATABASE_USER}
-      FUT_MANAGER_DATABASE_PASSWORD: ${FUT_MANAGER_DATABASE_PASSWORD}
+      FUT_MANAGER_DATABASE_HOST: ${FUT_MANAGER_DATABASE_HOST:?Defina FUT_MANAGER_DATABASE_HOST no ambiente privado}
+      FUT_MANAGER_DATABASE_PORT: ${FUT_MANAGER_DATABASE_PORT:?Defina FUT_MANAGER_DATABASE_PORT no ambiente privado}
+      FUT_MANAGER_DATABASE_NAME: ${FUT_MANAGER_DATABASE_NAME:?Defina FUT_MANAGER_DATABASE_NAME no ambiente privado}
+      FUT_MANAGER_DATABASE_USER: ${FUT_MANAGER_DATABASE_USER:?Defina FUT_MANAGER_DATABASE_USER no ambiente privado}
+      FUT_MANAGER_DATABASE_PASSWORD: ${FUT_MANAGER_DATABASE_PASSWORD:?Defina FUT_MANAGER_DATABASE_PASSWORD no ambiente privado}
       FUT_MANAGER_DATABASE_ECHO: "false"
       FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP: "true"
     depends_on:
@@ -25,15 +25,15 @@ services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: ${FUT_MANAGER_DATABASE_NAME}
-      POSTGRES_USER: ${FUT_MANAGER_DATABASE_USER}
-      POSTGRES_PASSWORD: ${FUT_MANAGER_DATABASE_PASSWORD}
+      POSTGRES_DB: ${FUT_MANAGER_DATABASE_NAME:?Defina FUT_MANAGER_DATABASE_NAME no ambiente privado}
+      POSTGRES_USER: ${FUT_MANAGER_DATABASE_USER:?Defina FUT_MANAGER_DATABASE_USER no ambiente privado}
+      POSTGRES_PASSWORD: ${FUT_MANAGER_DATABASE_PASSWORD:?Defina FUT_MANAGER_DATABASE_PASSWORD no ambiente privado}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -42,4 +42,4 @@ volumes:
   postgres_data:
     # Externo para sobreviver inclusive a docker compose down -v.
     external: true
-    name: ${FUT_MANAGER_DATABASE_VOLUME}
+    name: ${FUT_MANAGER_DATABASE_VOLUME:?Defina o volume privado existente}

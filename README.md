@@ -73,9 +73,8 @@ projeto; quando houver dados reais, a evolução do esquema deve passar a ser fe
 por migrations versionadas, nunca por `create_all`.
 
 As configurações são validadas por Pydantic ao iniciar. Copie `.env.example` para
-`.env` em execução local e use as variáveis `FUT_MANAGER_*`; o Docker Compose já
-fornece explicitamente todas as variáveis necessárias para comunicação entre os
-containers. As configurações de banco são obrigatórias: uma variável ausente
+`.env` em execução local e use as variáveis `FUT_MANAGER_*`; o Docker Compose lê os valores privados do `.env` ou do ambiente de execução.
+Defina também o nome do volume já existente para preservar os dados locais. As configurações de banco são obrigatórias: uma variável ausente
 impede a API de iniciar.
 
 Para a conexão PostgreSQL, configure separadamente `FUT_MANAGER_DATABASE_HOST`,
@@ -212,7 +211,7 @@ A classificação dos grupos também segue esses critérios.
 
 Para criar uma edição local com 16 times fictícios, 32 jogadores e os 120 jogos
 das 15 rodadas simulados, execute no ambiente da API:
-`PYTHONPATH=. python scripts/simulate_demo_league.py --owner-email IDENTIDADE_DE_DEMONSTRACAO_PRIVADA`.
+`PYTHONPATH=. python scripts/simulate_demo_league.py --owner-email SEU_EMAIL_DE_TESTE`.
 O script registra súmulas, gols e assistências, encerra o campeonato e distribui
 os troféus usando os controllers da aplicação. A execução é atômica e repetir
 o comando reutiliza a mesma demonstração concluída. A simulação começa pela
@@ -421,10 +420,10 @@ inicialização de desenvolvimento. Testes: `tests/test_draw.py` e
 
 `scripts/seed_demo.py` popula um grupo existente de forma idempotente. A senha é
 lida de `FUT_MANAGER_DEMO_PASSWORD`; não é necessário editar o script.
-O seed também cria ou atualiza a conta de demonstração `IDENTIDADE_DE_DEMONSTRACAO_PRIVADA`, com
-senha `SENHA_DE_DEMONSTRACAO_PRIVADA`, e garante seu vínculo ativo como `owner` em todos os grupos
-existentes. Ao repetir o seed, essa senha é restaurada se tiver sido alterada;
-as senhas das demais contas e os criadores originais dos grupos são preservados.
+O seed usa a identidade e senha do ambiente privado (`FUT_MANAGER_DEMO_OWNER_EMAIL`
+e `FUT_MANAGER_DEMO_OWNER_PASSWORD`), não redefine senhas existentes e garante
+seu vínculo como `owner` somente no grupo informado. Ao repetir o seed, as senhas
+e os criadores originais dos grupos são preservados.
 Use `--group-id UUID --saturday 2026-09-26 --start-now` para criar três eventos
 históricos e um evento atual com seis confirmados. O script preserva registros
 existentes e não reinicia um evento que o usuário já começou a testar.
@@ -555,3 +554,23 @@ ativadas, a tabela acumula todas as partidas, como os demais rankings.
 cada usuário retire a própria confirmação ou saia da lista de espera, mesmo após
 o prazo de inscrição. Libera a vaga e promove a fila por função, preservando
 os registros das partidas. Eventos encerrados ou cancelados são somente consulta.
+
+O cadastro retorna conflito de e-mail somente se houver um perfil com o mesmo
+endereço. Violações de outras restrições do banco retornam erro de servidor e
+registram SQLSTATE, restrição, tabela e coluna no log, sem SQL, e-mail, senha
+ou hash. Se não houver requisições no log da API esperada, confira o servidor
+`API_UPSTREAM` configurado no proxy do PWA.
+
+## Configuração privada
+
+`.env.example` lista as chaves esperadas, sem endereços ou credenciais reais.
+Configure os valores no painel do provedor ou em `.env`, ignorado pelo Git.
+O Compose exige banco, usuário, senha, host, porta e volume pelo ambiente e não
+fornece credenciais padrão. Nunca envie `.env`, chaves ou dumps ao repositório.
+O catálogo privado usado pelo script PSF fica fora do controle de versão;
+indique seu arquivo JSON em `PSF_ROSTER_FILE`.
+Os nomes das variáveis fazem parte do contrato da aplicação; seus valores são privados.
+
+A revisão automática `python scripts/check_private_config.py` rejeita arquivos
+privados, endpoints de implantação e credenciais fixas antes de publicar.
+O workflow do GitHub repete essa revisão e usa Gitleaks com saída redigida.

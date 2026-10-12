@@ -15,9 +15,9 @@ from src.controllers.championships import detail
 async def main():
     async with SessionLocal() as db:
         async with db.begin():
-            owner = await db.scalar(select(Profile).where(func.lower(Profile.email) == os.environ["FUT_MANAGER_DEMO_OWNER_EMAIL"]).with_for_update())
+            owner = await db.scalar(select(Profile).where(func.lower(Profile.email) == os.environ["FUT_MANAGER_DEMO_OWNER_EMAIL"].strip().lower()).with_for_update())
             if owner is None or not owner.is_active:
-                raise RuntimeError("A conta IDENTIDADE_DE_DEMONSTRACAO_PRIVADA precisa existir e estar ativa.")
+                raise RuntimeError("A conta de demonstração configurada precisa existir e estar ativa.")
             cup_id = uuid5(owner.id, "cascade-demo-2026-v1")
             cup = await db.get(Championship, cup_id)
             if cup is None:

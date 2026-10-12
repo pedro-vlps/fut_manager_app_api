@@ -16,7 +16,7 @@ async def main(championship_id):
             service = ChampionshipsService(db)
             cup = await service.locked(Championship, championship_id)
             owner = await db.get(Profile, cup.owner_id) if cup else None
-            if not cup or not owner or owner.email.lower() != os.environ["FUT_MANAGER_DEMO_OWNER_EMAIL"]:
+            if not cup or not owner or owner.email.lower() != os.environ["FUT_MANAGER_DEMO_OWNER_EMAIL"].strip().lower():
                 raise RuntimeError('Campeonato de teste da conta solicitada não encontrado.')
             if cup.format != 'groups_knockout' or cup.capacity != 4 or cup.status != 'registration':
                 raise RuntimeError('A edição precisa ser de grupos + mata-mata, com 4 vagas e inscrições abertas.')

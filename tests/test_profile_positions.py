@@ -41,6 +41,46 @@ class ProfilePositionTests(AuthTestCase):
         catalog = (await self.client.get('/auth/modalities')).json()
         self.assertEqual(set(catalog), {'campo','futsal','fut7'})
 
+    async def test_registration_database_failure_is_not_reported_as_duplicate_email(self):
+        from sqlalchemy import text
+        # Reproduce a legacy deployment with an unexpected required column.
+        await self.db.execute(text("ALTER TABLE profiles ADD COLUMN registration_required TEXT NOT NULL DEFAULT 'existing'"))
+        await self.db.execute(text("ALTER TABLE profiles ALTER COLUMN registration_required DROP DEFAULT"))
+        payload = {'name': 'Novo perfil', 'email': f'{uuid4()}@example.test',
+                   'password': 'private-test-password', 'positions': {'campo': ['meia']}}
+        with self.assertLogs('src.controllers.auth', level='ERROR') as captured:
+            response = await self.client.post('/auth/register', json=payload)
+        self.assertEqual(response.status_code, 500, response.text)
+        self.assertNotIn('Já existe', response.text)
+        logs = '\n'.join(captured.output)
+        self.assertIn('sqlstate=23502', logs)
+        self.assertIn('column=registration_required', logs)
+        self.assertNotIn(payload['email'], logs)
+        self.assertNotIn(payload['password'], logs)
+        self.assertNotIn('INSERT INTO', logs)
+
+    async def test_registration_duplicate_race_still_returns_conflict(self):
+        from unittest.mock import patch
+        from src.services.auth import AuthService
+        original = AuthService.find_profile_id_by_email
+        checks = 0
+
+        async def race_check(service, email):
+            nonlocal checks
+            checks += 1
+            # Model a concurrent insert becoming visible after the first lookup.
+            return None if checks == 1 else await original(service, email)
+
+        # Persist the fixture in the outer transaction before the failed savepoint.
+        await self.db.commit()
+        payload = {'name': 'Corrida', 'email': self.user.email,
+                   'password': 'test-password-123', 'positions': {'campo': ['meia']}}
+        with patch.object(AuthService, 'find_profile_id_by_email', race_check):
+            response = await self.client.post('/auth/register', json=payload)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(checks, 2)
+        self.assertEqual(response.json()['detail'], 'Já existe uma conta com este e-mail.')
+
     async def test_invalid_positions_and_partial_updates(self):
         base = {'name':'Teste', 'email':f'{uuid4()}@example.test', 'password':'test-password-123'}
         for positions in [None, {}, {'futsal':[]}, {'basquete':['goleiro']}, {'futsal':['zagueiro']},

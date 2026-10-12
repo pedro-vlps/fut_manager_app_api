@@ -13,7 +13,7 @@ from src.configs.db_connection import SessionLocal, engine
 from src.models.entities import Profile, PeladaGroup, GroupMember, PeladaEvent, EventPresence
 from src.models.enums import GroupRole, MembershipStatus, EventStatus, PresenceStatus, TeamPlayerRole
 
-ROSTER = json.loads(Path(os.environ["PSF_ROSTER_FILE"]).read_text(encoding="utf-8"))
+
 
 
 def uid(key):
@@ -21,12 +21,13 @@ def uid(key):
 
 
 async def run(args):
+    roster = json.loads(Path(os.environ["PSF_ROSTER_FILE"]).read_text(encoding="utf-8"))
     async with SessionLocal() as db, db.begin():
-        owner = await db.scalar(select(Profile).where(func.lower(Profile.email) == os.environ["FUT_MANAGER_DEMO_OWNER_EMAIL"]))
+        owner = await db.scalar(select(Profile).where(func.lower(Profile.email) == os.environ["FUT_MANAGER_DEMO_OWNER_EMAIL"].strip().lower()))
         existing_groups = (await db.scalars(select(PeladaGroup).where(func.lower(PeladaGroup.name) == 'psf'))).all()
         profiles = (await db.scalars(select(Profile).where(
-            (Profile.email.in_([slug + '@psf.test' for _, slug in ROSTER])) |
-            (func.lower(Profile.name).in_([name.lower() for name, _ in ROSTER]))
+            (Profile.email.in_([slug + '@psf.test' for _, slug in roster])) |
+            (func.lower(Profile.name).in_([name.lower() for name, _ in roster]))
         ))).all()
         if args.inspect:
             print(json.dumps({'owner': {'id': str(owner.id), 'name': owner.name, 'active': owner.is_active} if owner else None,
@@ -58,7 +59,7 @@ async def run(args):
             min_confirmed_goalkeepers=2, max_confirmed_goalkeepers=2,
             status=EventStatus.REGISTRATION_OPEN)
         accounts = []
-        for index, (name, slug) in enumerate(ROSTER):
+        for index, (name, slug) in enumerate(roster):
             email = slug + '@psf.test'
             collision = await db.scalar(select(Profile).where(func.lower(Profile.email) == email))
             if collision and collision.id != uid('profile:' + slug):

@@ -1,6 +1,6 @@
 """Cria uma liga local de demonstração e simula as 15 rodadas atomicamente.
 
-Execute no ambiente da API: python scripts/simulate_demo_league.py --owner-email IDENTIDADE_DE_DEMONSTRACAO_PRIVADA
+Execute no ambiente da API: python scripts/simulate_demo_league.py --owner-email SEU_EMAIL_DE_TESTE
 Use --home-and-away para criar 30 rodadas e deixar o returno pendente.
 Pode repetir: reutiliza a mesma edição de demonstração já simulada.
 """

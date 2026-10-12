@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="FUT_MANAGER_",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     app_name: str
@@ -23,7 +24,7 @@ class Settings(BaseSettings):
     database_port: int = Field(ge=1, le=65535)
     database_name: str = Field(min_length=1)
     database_user: str = Field(min_length=1)
-    database_password: SecretStr
+    database_password: SecretStr = Field(min_length=1)
     database_echo: bool
     create_schema_on_startup: bool
     cors_origins: list[str] = Field(default_factory=list)
