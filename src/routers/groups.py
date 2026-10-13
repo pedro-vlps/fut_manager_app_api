@@ -14,6 +14,12 @@ from src.routers.dependencies import current_profile, accessible_group
 router = APIRouter(prefix="/my-groups", tags=["Área do grupo"])
 
 
+@router.post('/{group_id}/code/rotate', response_model=GroupOverview)
+async def rotate_code(group: PeladaGroup = Depends(accessible_group),
+                      profile: Profile = Depends(current_profile), db: AsyncSession = Depends(get_db_session)):
+    return await controller.rotate_code(group, profile, db)
+
+
 @router.get("/{group_id}/standings", response_model=list[RankingEntry])
 async def general_standings(
     group: PeladaGroup = Depends(accessible_group),

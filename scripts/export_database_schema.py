@@ -44,7 +44,7 @@ SET LOCAL search_path TO public;
         parts.append(f'\n-- Complemento: {migration}\n' + (scripts / migration).read_text(encoding='utf-8-sig'))
     parts.append('\nCOMMIT;\n')
     destination = scripts / 'create_database.sql'
-    destination.write_text('\n\n'.join(parts), encoding='utf-8')
+    destination.write_text('\n'.join(line.rstrip() for line in '\n\n'.join(parts).splitlines()) + '\n', encoding='utf-8')
     print(f'{destination}: {len(Base.metadata.tables)} tabelas; {len(migrations)} complementos SQL.')
 
 

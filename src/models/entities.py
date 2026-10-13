@@ -22,7 +22,9 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
+from src.models.privacy import EncryptedText, EncryptedJSON
+from src.helpers.privacy import email_lookup
 from sqlalchemy.dialects.postgresql import JSONB
 
 from src.helpers.passwords import hash_password, verify_password
@@ -42,10 +44,11 @@ from src.models.enums import (
 class Profile(UUIDTimestampMixin, Base):
     __tablename__ = "profiles"
 
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(EncryptedText(), nullable=False)
+    email: Mapped[str] = mapped_column(EncryptedText(), nullable=False)
+    email_lookup: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    avatar_url: Mapped[Optional[str]] = mapped_column(String(500))
+    avatar_url: Mapped[Optional[str]] = mapped_column(EncryptedText())
     positions: Mapped[dict] = mapped_column(
         JSONB, default=dict, server_default=text("'{}'::jsonb"), nullable=False
     )
@@ -63,6 +66,12 @@ class Profile(UUIDTimestampMixin, Base):
     )
     lineup_entries: Mapped[list[MatchLineup]] = relationship(back_populates="profile")
     game_actions: Mapped[list[GameAction]] = relationship(back_populates="player")
+
+    @validates('email')
+    def normalize_email(self, key, value):
+        value = value.strip().casefold()
+        self.email_lookup = email_lookup(value)
+        return value
 
     @property
     def password(self) -> None:
@@ -142,7 +151,7 @@ class GroupSeason(UUIDTimestampMixin, Base):
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    archived_rankings: Mapped[Optional[list]] = mapped_column(JSONB(none_as_null=True))
+    archived_rankings: Mapped[Optional[list]] = mapped_column(EncryptedJSON())
 
 
 class SeasonTrophy(UUIDTimestampMixin, Base):
@@ -202,7 +211,7 @@ class GroupGuest(UUIDTimestampMixin, Base):
     created_by_id: Mapped[UUID] = mapped_column(
         ForeignKey("profiles.id"), nullable=False
     )
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    name: Mapped[str] = mapped_column(EncryptedText(), nullable=False)
 
     group: Mapped[PeladaGroup] = relationship(back_populates="guests")
     created_by: Mapped[Profile] = relationship(back_populates="created_guests")

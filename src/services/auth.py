@@ -1,3 +1,4 @@
+from src.helpers.privacy import email_lookup
 from sqlalchemy import func, or_, select
 from src.models.entities import GroupMember, PeladaGroup, Profile
 from src.models.enums import MembershipStatus
@@ -21,13 +22,13 @@ class AuthService(DatabaseService):
 
     async def find_profile_id_by_email(self, email):
         return await self.db.scalar(
-            select(Profile.id).where(func.lower(Profile.email) == email)
+            select(Profile.id).where(Profile.email_lookup == email_lookup(email))
         )
 
     async def profiles_by_email(self, email: str):
         return (
             await self.db.scalars(
-                select(Profile).where(func.lower(Profile.email) == email)
+                select(Profile).where(Profile.email_lookup == email_lookup(email))
             )
         ).all()
 

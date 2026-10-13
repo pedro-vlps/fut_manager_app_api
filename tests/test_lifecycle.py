@@ -11,7 +11,7 @@ from src.routers.groups import router as groups_router
 from src.routers.lifecycle import router as lifecycle_router
 
 
-class LifecycleTests(AuthTestCase):
+class LifecycleFixture(AuthTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.app.include_router(groups_router)
@@ -68,6 +68,9 @@ class LifecycleTests(AuthTestCase):
         await self.post('/start')
         return await self.post('/kickoff', {'mode':'manual', 'team_ids':[t['id'] for t in state['teams'][:2]]})
 
+
+
+class LifecycleTests(LifecycleFixture):
     async def test_full_cycle_actions_queue_ties_and_rankings(self):
         state = await self.setup_match()
         first = state['current_match']

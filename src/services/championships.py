@@ -1,4 +1,5 @@
-from sqlalchemy import select, func, or_
+from src.helpers.privacy import email_lookup
+from sqlalchemy import select, func, or_, delete, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from src.models.entities import Profile
 from src.models.championships import Club, ClubMember, Championship, ChampionshipEntry, ChampionshipPlayer, ChampionshipMatch, ChampionshipStatistic, ChampionshipTrophy
@@ -6,6 +7,26 @@ from src.services.base import DatabaseService
 
 
 class ChampionshipsService(DatabaseService):
+    async def club_owners(self, championship_id):
+        return dict((await self.db.execute(select(Club.id, Club.owner_id).where(Club.id.in_(
+            select(ChampionshipEntry.club_id).where(ChampionshipEntry.championship_id == championship_id))))).all())
+
+    async def open_club_editions(self, club_id):
+        return (await self.db.scalars(select(Championship).where(Championship.status != 'finished',
+            Championship.id.in_(select(ChampionshipEntry.championship_id).where(ChampionshipEntry.club_id == club_id)))
+            .order_by(Championship.id).with_for_update())).all()
+    async def generate_code(self, kind):
+        functions = {'championship': func.generate_championship_code, 'club': func.generate_club_code}
+        return await self.db.scalar(select(functions[kind]()))
+
+    async def club_by_code(self, code):
+        return await self.db.scalar(select(Club).where(Club.code == code.upper()).with_for_update())
+
+    async def club_titles(self, club_id):
+        return (await self.db.scalars(select(Championship).where(
+            Championship.champion_id == club_id, Championship.status == 'finished')
+            .order_by(Championship.created_at.desc()))).all()
+
     async def by_code(self, code):
         return await self.db.scalar(select(Championship).where(Championship.code == code))
 
@@ -34,6 +55,13 @@ class ChampionshipsService(DatabaseService):
             await self.db.execute(insert(ChampionshipTrophy).values(awards).on_conflict_do_nothing(
                 index_elements=["championship_id", "profile_id", "category"]))
 
+    async def prune_individual_awards(self, championship_id, winners):
+        query = delete(ChampionshipTrophy).where(ChampionshipTrophy.championship_id == championship_id,
+            ChampionshipTrophy.category.in_(['championship_goals', 'championship_assists', 'championship_goals_conceded']))
+        if winners:
+            query = query.where(tuple_(ChampionshipTrophy.category, ChampionshipTrophy.profile_id).not_in(winners))
+        await self.db.execute(query)
+
     async def locked(self, model, identifier):
         return await self.db.scalar(select(model).where(model.id == identifier).with_for_update())
 
@@ -50,7 +78,7 @@ class ChampionshipsService(DatabaseService):
         return await self.db.scalar(select(ClubMember).where(ClubMember.club_id == club_id, ClubMember.profile_id == profile_id))
 
     async def profile_by_email(self, email):
-        return await self.db.scalar(select(Profile).where(func.lower(Profile.email) == email.lower(), Profile.is_active.is_(True)))
+        return await self.db.scalar(select(Profile).where(Profile.email_lookup == email_lookup(email), Profile.is_active.is_(True)))
 
     async def invitations(self, profile_id):
         return (await self.db.execute(select(ClubMember, Club.name).join(Club, Club.id == ClubMember.club_id)

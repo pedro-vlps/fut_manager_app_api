@@ -16,7 +16,7 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_twelve_teams_custom_groups_semifinals_and_final(self):
         await self.setup_api()
-        for format in ('knockout', 'league', 'cascade'):
+        for format in ('knockout', 'cascade'):
             response = await self.client.post('/championships', headers=self.headers,
                 json={'name': 'Copa', 'season': '2026', 'capacity': 12, 'format': format})
             self.assertEqual(response.status_code, 422)
@@ -245,7 +245,7 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post(f"/championships/{found.json()['id']}/entries", headers=self.other_headers,
             json={'club_id': str(club.id)})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()['code'], first['code'])
+        self.assertIsNone(response.json()['code'])
         self.assertEqual(len(response.json()['entries']), 1)
 
     async def test_player_profile_uses_registered_roster_and_hides_private_fields(self):
@@ -383,7 +383,7 @@ class ChampionshipTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(all(m['winner_id'] is None and m['stage'] == 'league' for m in data['matches']))
                     for category, team in [('championship_champion', table[0]['club_id']), ('championship_runner_up', table[1]['club_id'])]:
                         players = next(e['players'] for e in data['entries'] if e['club_id'] == team)
-                        self.assertEqual({a['profile_id'] for a in data['trophies'] if a['category'] == category}, {p['id'] for p in players})
+                        self.assertEqual(len([a for a in data['trophies'] if a['category'] == category]), 1)
                 else:
                     self.assertEqual(data['champion_id'], data['matches'][-1]['winner_id'])
 

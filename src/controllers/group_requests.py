@@ -27,7 +27,7 @@ async def search(query, profile, db):
         state = "active"
     elif member and member.status == MembershipStatus.BLOCKED:
         state = "blocked"
-    return DiscoveredGroup(id=group.id, name=group.name, code=group.code,
+    return DiscoveredGroup(id=group.id, name=group.name,
                            description=group.description, membership=state,
                            request_status=existing.status if existing else None)
 

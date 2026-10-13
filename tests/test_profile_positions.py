@@ -29,7 +29,7 @@ class ProfilePositionTests(AuthTestCase):
 
     async def test_registration_positions_persist_and_login(self):
         positions = {'campo':['goleiro','volante'], 'futsal':['fixo','pivo'], 'fut7':['meia','ala_direita']}
-        payload = {'name':'Jogador novo', 'email':f'{uuid4()}@example.test', 'password':'test-password-123', 'positions':positions}
+        payload = {'name':'Jogador novo', 'email':f'{uuid4()}@example.test', 'password':'Test-password-123!', 'positions':positions}
         response = await self.client.post('/auth/register', json=payload)
         self.assertEqual(response.status_code, 201, response.text)
         self.assertEqual(response.json()['positions'], positions)
@@ -47,7 +47,7 @@ class ProfilePositionTests(AuthTestCase):
         await self.db.execute(text("ALTER TABLE profiles ADD COLUMN registration_required TEXT NOT NULL DEFAULT 'existing'"))
         await self.db.execute(text("ALTER TABLE profiles ALTER COLUMN registration_required DROP DEFAULT"))
         payload = {'name': 'Novo perfil', 'email': f'{uuid4()}@example.test',
-                   'password': 'private-test-password', 'positions': {'campo': ['meia']}}
+                   'password': 'Private-test-password1!', 'positions': {'campo': ['meia']}}
         with self.assertLogs('src.controllers.auth', level='ERROR') as captured:
             response = await self.client.post('/auth/register', json=payload)
         self.assertEqual(response.status_code, 500, response.text)
@@ -74,7 +74,7 @@ class ProfilePositionTests(AuthTestCase):
         # Persist the fixture in the outer transaction before the failed savepoint.
         await self.db.commit()
         payload = {'name': 'Corrida', 'email': self.user.email,
-                   'password': 'test-password-123', 'positions': {'campo': ['meia']}}
+                   'password': 'Test-password-123!', 'positions': {'campo': ['meia']}}
         with patch.object(AuthService, 'find_profile_id_by_email', race_check):
             response = await self.client.post('/auth/register', json=payload)
         self.assertEqual(response.status_code, 409, response.text)
@@ -82,7 +82,7 @@ class ProfilePositionTests(AuthTestCase):
         self.assertEqual(response.json()['detail'], 'Já existe uma conta com este e-mail.')
 
     async def test_invalid_positions_and_partial_updates(self):
-        base = {'name':'Teste', 'email':f'{uuid4()}@example.test', 'password':'test-password-123'}
+        base = {'name':'Teste', 'email':f'{uuid4()}@example.test', 'password':'Test-password-123!'}
         for positions in [None, {}, {'futsal':[]}, {'basquete':['goleiro']}, {'futsal':['zagueiro']},
             {'campo':['goleiro','goleiro']}, {'campo':['goleiro'], 'futsal':[]}]:
             response = await self.client.post('/auth/register', json={**base,'positions':positions})
@@ -99,7 +99,7 @@ class ProfilePositionTests(AuthTestCase):
         from src.models import CRUD_MODELS
         options = CRUD_MODELS[0]
         self.app.include_router(Router(**{k:v for k,v in options.items() if k not in {'prefix','tags'}}).router, prefix='/profiles')
-        payload = {'name':'CRUD teste', 'email':f'{uuid4()}@example.test', 'password':'test-password-123'}
+        payload = {'name':'CRUD teste', 'email':f'{uuid4()}@example.test', 'password':'Test-password-123!'}
         response = await self.client.post('/profiles', json=payload)
         self.assertEqual(response.status_code, 422)
         payload['positions'] = {'fut7':['fixo','pivo']}

@@ -1,6 +1,7 @@
 """Configurações validadas da aplicação."""
 
 from urllib.parse import quote
+import os
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,6 +29,8 @@ class Settings(BaseSettings):
     database_echo: bool
     create_schema_on_startup: bool
     cors_origins: list[str] = Field(default_factory=list)
+    personal_data_keys: list[SecretStr] = Field(default_factory=list)
+    email_lookup_key: SecretStr | None = None
 
     @field_validator("database_host", "database_name", "database_user")
     @classmethod
@@ -50,4 +53,4 @@ class Settings(BaseSettings):
         )
 
 
-settings = Settings()
+settings = Settings(_env_file=os.environ.get('FUT_MANAGER_ENV_FILE', '.env') or None)

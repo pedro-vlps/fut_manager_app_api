@@ -9,7 +9,7 @@ from api_crud_generate_libary.routers.router import Router
 from src.configs.settings import settings
 from src.configs.db_connection import engine
 from src.databases.scripts.create_schema import create_schema
-from src.models import CRUD_MODELS
+from src.models import CRUD_MODELS, Profile
 from src.routers.auth import router as auth_router
 from src.routers.groups import router as groups_router
 from src.routers.lifecycle import router as lifecycle_router
@@ -26,6 +26,9 @@ from src.routers.championships import router as championships_router
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Inicializa recursos configurados para o ciclo de vida da aplicação."""
+    from src.helpers.privacy import cipher, email_lookup
+    cipher()
+    email_lookup('configuration-check')
     if settings.create_schema_on_startup:
         await create_schema()
     yield
@@ -61,6 +64,10 @@ app.include_router(championships_router)
 app.include_router(lifecycle_router)
 
 for crud_model in CRUD_MODELS:
+    if crud_model['model_class'] is Profile:
+        # Contas são criadas por /auth/register e consultadas por /auth/me.
+        # O CRUD geral expunha os e-mails de todos os perfis sem autenticação.
+        continue
     router_options = {
         key: value for key, value in crud_model.items() if key not in {"prefix", "tags"}
     }

@@ -15,9 +15,12 @@ def entry_pools(entries):
 def initial_fixtures(entries, format, home_and_away=False):
     ids = [e.club_id for e in entries]
     if format == "league":
+        if len(ids) % 2:
+            ids.append(None)
         fixtures = []
         for round in range(1, len(ids)):
-            fixtures.extend(("league", round, None, ids[i], ids[-i - 1]) for i in range(len(ids) // 2))
+            fixtures.extend(("league", round, None, ids[i], ids[-i - 1]) for i in range(len(ids) // 2)
+                            if ids[i] is not None and ids[-i - 1] is not None)
             ids = [ids[0], ids[-1], *ids[1:-1]]
         if home_and_away:
             fixtures.extend([(stage, round + len(ids) - 1, pool, away, home)
@@ -82,12 +85,18 @@ def standings(entries, matches, general=False):
             row.wins += int(scored > conceded)
             row.draws += int(scored == conceded)
             row.losses += int(scored < conceded)
-    return sorted(rows.values(), key=lambda r: (r.pool, -r.points, -r.wins, -r.draws, r.losses, -r.goals_for, r.seed))
+    for entry in entries:
+        if entry.club_id in rows:
+            rows[entry.club_id].points -= getattr(entry, 'points_deducted', 0) or 0
+            rows[entry.club_id].disqualified = bool(getattr(entry, 'disqualified', False))
+    return sorted(rows.values(), key=lambda r: (r.pool, r.disqualified, -r.points, -r.wins, -r.draws, r.losses, -r.goals_for, r.seed))
 
 
 def qualified_pairs(entries, matches):
     pools = {}
     for row in standings(entries, matches):
+        if row.disqualified:
+            continue
         pools.setdefault(row.pool, []).append(row.club_id)
     groups = list(pools.values())
     if len(entries) == 12:

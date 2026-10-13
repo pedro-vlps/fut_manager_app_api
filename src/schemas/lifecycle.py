@@ -89,8 +89,10 @@ class ActionView(BaseModel):
     id: UUID
     team_id: UUID
     player_name: str
+    person_id: UUID
     action_type: GameActionType
     minute: int | None
+    auto_generated: bool = False
 
 
 class MatchView(BaseModel):

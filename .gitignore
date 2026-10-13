@@ -20,3 +20,5 @@ __pycache__/
 *.backup
 security-audit.local.json
 private-config/
+
+*.local.log

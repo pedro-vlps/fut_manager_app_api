@@ -8,6 +8,8 @@ services:
     volumes:
       - ./src:/app/src
     environment:
+      FUT_MANAGER_PERSONAL_DATA_KEYS: ${FUT_MANAGER_PERSONAL_DATA_KEYS:?Configure as chaves de criptografia}
+      FUT_MANAGER_EMAIL_LOOKUP_KEY: ${FUT_MANAGER_EMAIL_LOOKUP_KEY:?Configure a chave do índice de e-mail}
       FUT_MANAGER_APP_NAME: Fut Manager API
       FUT_MANAGER_DEBUG: "false"
       FUT_MANAGER_DOCS_ENABLED: "${FUT_MANAGER_DOCS_ENABLED:-true}"

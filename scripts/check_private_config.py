@@ -16,6 +16,7 @@ DSN = re.compile(r"postgres(?:ql)?(?:\+\w+)?://[^\s{}:'\"]+:[^\s{}@'\"]+@")
 HTTP_URL = re.compile(r"https?://[a-zA-Z0-9.-]+(?::[0-9]+)?(?:/[^\s\"'`<>]*)?")
 # Public documentation, standards and dependency registries are not deployment data.
 PUBLIC_HOSTS = {
+    'cryptography.io', 'cheatsheetseries.owasp.org',
     'docs.expo.dev', 'expo.dev', 'www.npmjs.com', 'registry.npmjs.org',
     'github.com', 'docs.github.com', 'chat.expo.dev', 'reactnative.dev',
     'www.w3.org', 'nativewind.dev', 'www.nativewind.dev', 'tamagui.dev',

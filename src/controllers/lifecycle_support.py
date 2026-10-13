@@ -15,6 +15,7 @@ from src.schemas.lifecycle import (
 )
 from src.services.lifecycle import LifecycleService
 from src.helpers.lifecycle import timer_elapsed
+from src.helpers.cards import SECOND_YELLOW_NOTE
 
 
 async def can_manage(db, group, profile):
@@ -110,6 +111,8 @@ async def snapshot(db, event, manager):
                     id=a.id,
                     team_id=a.team_id,
                     player_name=name or guest_name,
+                    person_id=a.player_id or a.guest_id,
+                    auto_generated=a.notes == SECOND_YELLOW_NOTE and a.action_type == GameActionType.RED_CARD,
                     action_type=a.action_type,
                     minute=a.minute,
                 )

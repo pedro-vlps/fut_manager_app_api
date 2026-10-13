@@ -2,13 +2,193 @@ from fastapi import HTTPException
 from uuid import UUID
 from datetime import datetime, timezone
 from src.models.championships import Club, ClubMember, Championship, ChampionshipEntry, ChampionshipPlayer, ChampionshipMatch, ChampionshipStatistic
-from src.models.entities import PeladaGroup
-from src.schemas.championships import ClubView, Person, InvitationView, ChampionshipView, ChampionshipDetail, EntryView, MatchView, CreatedGroup, ChampionshipAward
+from src.models.entities import PeladaGroup, Profile
+from src.schemas.championships import ClubView, Person, InvitationView, ChampionshipView, ChampionshipDetail, EntryView, MatchView, CreatedGroup, ChampionshipAward, ClubTrophy
 from src.services.championships import ChampionshipsService
 from src.helpers.championships import initial_fixtures, standings, qualified_pairs, cascade_next, loser
 from src.helpers.championship_trophies import CATEGORIES, player_rankings, trophy_winners
 from src.schemas.trophies import TrophySchema
 from src.schemas.championships import PlayerStatistic
+from secrets import SystemRandom
+from src.helpers.cards import card_error, sync_championship_cards
+from src.helpers.championship_goalkeepers import begin_goalkeeping, goal_recipient
+
+
+def championship_view(championship, profile):
+    result = ChampionshipView.model_validate(championship)
+    if profile is None or championship.owner_id != profile.id:
+        result.code = None
+    return result
+
+
+async def rotate_code(championship_id, profile, db):
+    service = ChampionshipsService(db)
+    championship = await require_entity(service, Championship, championship_id, lock=True)
+    require_owner(championship, profile)
+    championship.code = await service.generate_code('championship')
+    await service.commit()
+    return championship_view(championship, profile)
+
+
+async def rotate_club_code(club_id, profile, db):
+    service = ChampionshipsService(db)
+    club = await require_entity(service, Club, club_id, lock=True)
+    require_owner(club, profile)
+    club.code = await service.generate_code('club')
+    await service.flush()
+    result = await club_view(service, club, profile)
+    await service.commit()
+    return result
+
+
+async def random_groups(championship_id, profile, db):
+    from src.schemas.championships import GroupAssignment
+    service = ChampionshipsService(db)
+    championship = await require_entity(service, Championship, championship_id, lock=True)
+    require_owner(championship, profile)
+    ids = [e.club_id for e, _ in await service.entries(championship.id)]
+    if championship.format != 'groups_knockout':
+        raise HTTPException(409, 'Sorteio disponível somente no formato com grupos.')
+    if len(ids) != championship.capacity:
+        raise HTTPException(409, 'Preencha todas as vagas antes de sortear os grupos.')
+    SystemRandom().shuffle(ids)
+    size = 3 if championship.capacity == 12 else 4
+    return await assign_groups(championship_id, GroupAssignment(groups=[ids[i:i + size] for i in range(0, len(ids), size)]), profile, db)
+
+
+async def punish(championship_id, payload, profile, db):
+    service = ChampionshipsService(db)
+    championship = await require_entity(service, Championship, championship_id, lock=True)
+    require_owner(championship, profile)
+    if championship.status != 'in_progress':
+        raise HTTPException(409, 'Punições estão disponíveis durante o campeonato.')
+    entries = [e for e, _ in await service.entries(championship.id)]
+    selected = set(payload.club_ids)
+    if len(selected) != len(payload.club_ids) or not selected <= {e.club_id for e in entries}:
+        raise HTTPException(422, 'Selecione times inscritos uma única vez.')
+    if payload.kind == 'points' and (payload.points < 1 or championship.format not in ('league', 'groups_knockout')):
+        raise HTTPException(422, 'Perda de pontos exige valor positivo e formato com tabela.')
+    if any(e.disqualified for e in entries if e.club_id in selected):
+        raise HTTPException(409, 'Um dos times já está desclassificado.')
+    if payload.kind == 'disqualification' and not any(not e.disqualified and e.club_id not in selected for e in entries):
+        raise HTTPException(409, 'É necessário manter ao menos um time elegível.')
+    for entry in entries:
+        if entry.club_id in selected:
+            if payload.kind == 'disqualification':
+                entry.disqualified = True
+            if payload.kind == 'points':
+                entry.points_deducted += payload.points
+            entry.punishments = [*entry.punishments, dict(kind=payload.kind, points=payload.points,
+                reason=payload.reason, applied_by=str(profile.id), applied_at=datetime.now(timezone.utc).isoformat())]
+    matches = await service.matches(championship.id)
+    await progress_championship(service, championship, matches)
+    await service.flush()
+    result = await detail(championship.id, profile, db)
+    await service.commit()
+    return result
+
+
+async def progress_championship(service, championship, matches):
+    """Resolve WOs e dependências sob o mesmo lock da edição, sem premiar gols individuais."""
+    entries = [e for e, _ in await service.entries(championship.id)]
+    banned = {e.club_id for e in entries if e.disqualified}
+    eligible = {e.club_id for e in entries} - banned
+    while championship.status == 'in_progress':
+        for match in matches:
+            if match.home_score is None and banned.intersection((match.home_id, match.away_id)):
+                match.walkover = match.statistics_complete = True
+                match.actions = []
+                match.home_goalkeeper_id = match.away_goalkeeper_id = None
+                match.goalkeeper_history = []
+                match.home_score = 0 if match.home_id in banned else 3
+                match.away_score = 0 if match.away_id in banned else 3
+                match.winner_id = match.home_id if match.home_score > match.away_score else match.away_id if match.away_score > match.home_score else None
+        if len(eligible) == 1:
+            championship.status, championship.champion_id = 'finished', next(iter(eligible))
+            break
+        if any(m.home_score is None for m in matches):
+            return
+        if championship.format == 'league':
+            championship.status, championship.champion_id = 'finished', standings(entries, matches, general=True)[0].club_id
+            break
+        latest = matches[-1]
+        if championship.format == 'cascade' and latest.stage != 'knockout':
+            if latest.stage == 'grand_final':
+                fixtures = []
+                championship.status, championship.champion_id = 'finished', latest.winner_id
+            else:
+                fixtures = cascade_next(matches)
+        elif latest.stage == 'groups':
+            # Preenche as vagas por grupo com os próximos elegíveis. Se um grupo
+            # ficou sem candidatos, usa a classificação geral dos demais grupos.
+            pools = {}
+            per_pool = 1 if len(entries) == 12 else 2
+            available = [r.club_id for r in standings(entries, matches, general=True) if not r.disqualified]
+            for e in entries:
+                pools.setdefault(e.pool or chr(65 + (e.seed - 1) // (3 if len(entries) == 12 else 4)), [])
+            for row in standings(entries, matches):
+                if not row.disqualified and len(pools[row.pool]) < per_pool:
+                    pools[row.pool].append(row.club_id)
+            used = {club for clubs in pools.values() for club in clubs}
+            for clubs in pools.values():
+                while len(clubs) < per_pool:
+                    replacement = next((club for club in available if club not in used), None)
+                    if replacement is None:
+                        break
+                    clubs.append(replacement)
+                    used.add(replacement)
+            groups = list(pools.values())
+            if any(len(group) < per_pool for group in groups):
+                count = 2 ** (len(eligible).bit_length() - 1)
+                clubs = available[:count]
+                groups = []
+            if not groups:
+                pairs = [(clubs[i], clubs[i+1]) for i in range(0, len(clubs), 2)]
+            elif len(entries) == 12:
+                pairs = [(groups[0][0], groups[1][0]), (groups[2][0], groups[3][0])]
+            elif len(groups) == 1:
+                pairs = [(groups[0][0], groups[0][1])]
+            else:
+                pairs = [pair for i in range(0, len(groups), 2) for pair in [(groups[i][0], groups[i+1][1]), (groups[i+1][0], groups[i][1])]]
+            fixtures = [('knockout', 1, None, a, b) for a, b in pairs]
+        else:
+            winners = [m.winner_id for m in matches if m.stage == 'knockout' and m.round == latest.round]
+            if len(winners) == 1:
+                winner = winners[0]
+                if winner not in eligible:
+                    winner = next(r.club_id for r in standings(entries, matches, general=True) if not r.disqualified)
+                championship.status, championship.champion_id = 'finished', winner
+                break
+            fixtures = [('knockout', latest.round + 1, None, winners[i], winners[i+1]) for i in range(0, len(winners), 2)]
+        if championship.status == 'finished':
+            break
+        # Ambos punidos: repescagem pela classificação, sem duplicar os times
+        # que já conquistaram uma vaga nesta rodada.
+        used = {club for f in fixtures for club in f[3:] if club in eligible}
+        replacements = [r.club_id for r in standings(entries, matches, general=True) if not r.disqualified and r.club_id not in used]
+        resolved = []
+        for stage, round, pool, home, away in fixtures:
+            pair = []
+            for club in (home, away):
+                if club not in eligible:
+                    if not replacements:
+                        pair = []
+                        break
+                    club = replacements.pop(0)
+                pair.append(club)
+            if pair:
+                resolved.append((stage, round, pool, *pair))
+        if len(resolved) != len(fixtures):
+            # Chave reduzida: os próximos elegíveis disputam uma nova fase.
+            count = 2 ** (len(eligible).bit_length() - 1)
+            clubs = [r.club_id for r in standings(entries, matches, general=True) if not r.disqualified][:count]
+            resolved = [('knockout', max((m.round for m in matches if m.stage == 'knockout'), default=0) + 1, None, clubs[i], clubs[i+1]) for i in range(0, count, 2)]
+        await add_matches(service, championship.id, resolved, len(matches))
+        await service.flush()
+        matches = await service.matches(championship.id)
+    await service.flush()
+    if championship.status == 'finished':
+        await award_championship(service, championship, matches[-1] if matches else None)
 
 
 def require_owner(entity, profile):
@@ -23,14 +203,86 @@ async def require_entity(service, model, identifier, lock=False):
     return entity
 
 
-async def club_view(service, club):
+async def club_view(service, club, profile):
     return ClubView(id=club.id, name=club.name, owner_id=club.owner_id,
-        members=[Person(id=p.id, name=p.name, status=m.status) for m, p in await service.members(club.id)])
+        members=[Person(id=p.id, name=p.name, status=m.status) for m, p in await service.members(club.id)],
+        code=club.code if club.owner_id == profile.id else None, starting_goalkeeper_id=club.starting_goalkeeper_id,
+        trophies=[ClubTrophy(championship_id=c.id, name=c.name, season=c.season, category="championship_champion")
+                  for c in await service.club_titles(club.id)])
+
+
+async def club_trophies(club_id, db):
+    service = ChampionshipsService(db)
+    await require_entity(service, Club, club_id)
+    return [ClubTrophy(championship_id=c.id, name=c.name, season=c.season, category='championship_champion')
+            for c in await service.club_titles(club_id)]
+
+
+async def update_entry_goalkeeper(service, championship, entry, goalkeeper):
+    entry.starting_goalkeeper_id = goalkeeper
+    for match in await service.matches(championship.id):
+        if match.home_score is not None or match.started_at or match.actions:
+            continue
+        for side in ('home', 'away'):
+            if getattr(match, f'{side}_id') == entry.club_id and not getattr(match, f'{side}_goalkeeper_override'):
+                setattr(match, f'{side}_goalkeeper_id', goalkeeper)
+
+
+async def set_club_goalkeeper(club_id, payload, profile, db):
+    service = ChampionshipsService(db)
+    club = await require_entity(service, Club, club_id)
+    require_owner(club, profile)
+    # Mesma ordem de locks usada na inscrição: edições, depois o clube.
+    editions = await service.open_club_editions(club_id)
+    club = await require_entity(service, Club, club_id, lock=True)
+    if payload.goalkeeper_id is not None:
+        member = await service.member(club_id, payload.goalkeeper_id)
+        target = await service.get(Profile, payload.goalkeeper_id)
+        if member is None or member.status != 'accepted' or target is None or not target.is_active:
+            raise HTTPException(422, 'Escolha um jogador ativo que aceitou o convite do próprio time.')
+    club.starting_goalkeeper_id = payload.goalkeeper_id
+    for championship in editions:
+        entry = next(e for e, _ in await service.entries(championship.id) if e.club_id == club_id)
+        if payload.goalkeeper_id is None or await service.registered_profile(championship.id, club_id, payload.goalkeeper_id):
+            await update_entry_goalkeeper(service, championship, entry, payload.goalkeeper_id)
+    await service.flush()
+    result = await club_view(service, club, profile)
+    await service.commit()
+    return result
+
+
+async def set_entry_goalkeeper(championship_id, club_id, payload, profile, db):
+    service = ChampionshipsService(db)
+    championship = await require_entity(service, Championship, championship_id, lock=True)
+    club = await require_entity(service, Club, club_id, lock=True)
+    require_owner(club, profile)
+    if championship.status == 'finished':
+        raise HTTPException(409, 'O campeonato está encerrado.')
+    entry = next((e for e, _ in await service.entries(championship.id) if e.club_id == club_id), None)
+    if entry is None:
+        raise HTTPException(404, 'Time não inscrito nesta edição.')
+    if payload.goalkeeper_id is not None and await service.registered_profile(championship.id, club_id, payload.goalkeeper_id) is None:
+        raise HTTPException(422, 'O titular precisa pertencer ao elenco inscrito do próprio time.')
+    await update_entry_goalkeeper(service, championship, entry, payload.goalkeeper_id)
+    await service.flush()
+    result = await detail(championship.id, profile, db)
+    await service.commit()
+    return result
+
+
+async def kickoff_match(championship_id, match_id, profile, db):
+    service = ChampionshipsService(db)
+    championship, match, _ = await editable_match(service, championship_id, match_id, profile)
+    begin_goalkeeping(match, profile.id)
+    await service.flush()
+    result = await detail(championship.id, profile, db)
+    await service.commit()
+    return result
 
 
 async def my_clubs(profile, db):
     service = ChampionshipsService(db)
-    return [await club_view(service, club) for club in await service.clubs(profile.id)]
+    return [await club_view(service, club, profile) for club in await service.clubs(profile.id)]
 
 
 async def create_club(payload, profile, db):
@@ -40,7 +292,7 @@ async def create_club(payload, profile, db):
     await service.flush()
     service.add(ClubMember(club_id=club.id, profile_id=profile.id, status="accepted"))
     await service.flush()
-    result = await club_view(service, club)
+    result = await club_view(service, club, profile)
     await service.commit()
     return result
 
@@ -58,7 +310,7 @@ async def invite(club_id, payload, profile, db):
     elif member.status == "declined":
         member.status = "pending"
     await service.flush()
-    result = await club_view(service, club)
+    result = await club_view(service, club, profile)
     await service.commit()
     return result
 
@@ -83,14 +335,14 @@ async def respond(invitation_id, payload, profile, db):
 
 
 async def list_championships(profile, db):
-    return [ChampionshipView.model_validate(c) for c in await ChampionshipsService(db).championships()]
+    return [championship_view(c, profile) for c in await ChampionshipsService(db).championships()]
 
 
 async def search_by_code(query, profile, db):
     championship = await ChampionshipsService(db).by_code(query.code.upper())
     if championship is None:
         raise HTTPException(404, "Nenhum campeonato encontrado com este código.")
-    return ChampionshipView.model_validate(championship)
+    return championship_view(championship, profile)
 
 
 async def create_championship(payload, profile, db):
@@ -98,7 +350,7 @@ async def create_championship(payload, profile, db):
     championship = Championship(**payload.model_dump(), owner_id=profile.id)
     service.add(championship)
     await service.flush()
-    result = ChampionshipView.model_validate(championship)
+    result = championship_view(championship, profile)
     await service.commit()
     return result
 
@@ -109,16 +361,20 @@ async def detail(championship_id, profile, db):
     entries = await service.entries(championship.id)
     players = await service.players(championship.id)
     matches = await service.matches(championship.id)
-    return ChampionshipDetail(**ChampionshipView.model_validate(championship).model_dump(),
+    owners = await service.club_owners(championship.id)
+    return ChampionshipDetail(**championship_view(championship, profile).model_dump(),
         entries=[EntryView(id=e.id, club_id=e.club_id, name=name, seed=e.seed,
+            disqualified=e.disqualified, points_deducted=e.points_deducted, punishments=e.punishments,
+            owner_id=owners[e.club_id], starting_goalkeeper_id=e.starting_goalkeeper_id,
             pool=(e.pool or chr(65 + (e.seed - 1) // (3 if championship.capacity == 12 else 4))) if championship.format == 'groups_knockout' else None,
             players=[Person(id=p.profile_id, name=n, status="accepted") for p, n in players if p.entry_id == e.id]) for e, name in entries],
-        matches=[MatchView.model_validate(m) for m in matches], standings=standings([e for e, _ in entries], matches),
+        matches=[MatchView.model_validate(m).model_copy(update={'bracket_size':
+            2 * sum(other.stage == 'knockout' and other.round == m.round for other in matches)
+            if m.stage == 'knockout' else None}) for m in matches], standings=standings([e for e, _ in entries], matches),
         general_standings=standings([e for e, _ in entries], matches, general=True),
-        player_rankings=player_rankings([e for e, _ in entries], players, await service.statistics(championship.id), matches),
+        player_rankings=player_rankings([e for e, _ in entries], players, await service.statistics(championship.id), matches, championship.champion_id),
         statistics_complete=all(m.statistics_complete for m in matches if m.home_score is not None),
-        trophies=[ChampionshipAward(**TrophySchema.model_validate(t).model_dump(), profile_id=t.profile_id, name=name)
-                  for t, name in await service.awards(championship.id)])
+        trophies=await edition_awards(service, championship, entries, players, matches))
 
 
 async def register(championship_id, payload, profile, db):
@@ -131,7 +387,7 @@ async def register(championship_id, payload, profile, db):
     entries = await service.entries(championship.id)
     if any(e.club_id == club.id for e, _ in entries):
         return await detail(championship.id, profile, db)
-    if len(entries) >= championship.capacity:
+    if championship.format != "league" and len(entries) >= championship.capacity:
         raise HTTPException(409, "O campeonato está com todas as vagas preenchidas.")
     members = [p for m, p in await service.members(club.id) if m.status == "accepted" and p.is_active]
     if len(members) < 2:
@@ -139,7 +395,8 @@ async def register(championship_id, payload, profile, db):
     registered = {p.profile_id for p, _ in await service.players(championship.id)}
     if any(p.id in registered for p in members):
         raise HTTPException(409, "Um jogador deste elenco já está inscrito por outro time neste campeonato.")
-    entry = ChampionshipEntry(championship_id=championship.id, club_id=club.id, seed=len(entries) + 1)
+    entry = ChampionshipEntry(championship_id=championship.id, club_id=club.id, seed=len(entries) + 1,
+        starting_goalkeeper_id=club.starting_goalkeeper_id if club.starting_goalkeeper_id in {p.id for p in members} else None)
     service.add(entry)
     await service.flush()
     for member in members:
@@ -184,10 +441,12 @@ async def withdraw(championship_id, club_id, profile, db):
     return result
 
 
-def add_matches(service, championship_id, fixtures, offset=0):
+async def add_matches(service, championship_id, fixtures, offset=0):
+    goalkeepers = {e.club_id: e.starting_goalkeeper_id for e, _ in await service.entries(championship_id)}
     for sequence, (stage, round, pool, home, away) in enumerate(fixtures, offset + 1):
         service.add(ChampionshipMatch(championship_id=championship_id, sequence=sequence,
-            stage=stage, round=round, pool=pool, home_id=home, away_id=away))
+            stage=stage, round=round, pool=pool, home_id=home, away_id=away,
+            home_goalkeeper_id=goalkeepers.get(home), away_goalkeeper_id=goalkeepers.get(away)))
 
 
 async def assign_groups(championship_id, payload, profile, db):
@@ -198,7 +457,7 @@ async def assign_groups(championship_id, payload, profile, db):
         raise HTTPException(409, "A edição de grupos está disponível somente para grupos + mata-mata.")
     matches = await service.matches(championship.id)
     if championship.status == "finished" or any(
-        m.home_score is not None or m.actions or m.home_goalkeeper_id or m.away_goalkeeper_id for m in matches
+        m.home_score is not None or m.actions or m.started_at or m.home_goalkeeper_override or m.away_goalkeeper_override for m in matches
     ):
         raise HTTPException(409, "Não é possível alterar os grupos após registrar um jogo, lance ou goleiro.")
     entries = [e for e, _ in await service.entries(championship.id)]
@@ -215,7 +474,7 @@ async def assign_groups(championship_id, payload, profile, db):
         for match in matches:
             await service.delete(match)
         await service.flush()
-        add_matches(service, championship.id, initial_fixtures(entries, championship.format))
+        await add_matches(service, championship.id, initial_fixtures(entries, championship.format))
     await service.flush()
     result = await detail(championship.id, profile, db)
     await service.commit()
@@ -231,9 +490,11 @@ async def start(championship_id, profile, db):
     if championship.format == "cascade" and championship.capacity != 4:
         raise HTTPException(409, "Cascata permite somente 4 times. Crie uma edição com 4 vagas.")
     entries = [e for e, _ in await service.entries(championship.id)]
-    if len(entries) != championship.capacity:
-        raise HTTPException(409, "Preencha todas as vagas antes de iniciar o campeonato.")
-    add_matches(service, championship.id, initial_fixtures(entries, championship.format, championship.home_and_away))
+    if (championship.format == "league" and len(entries) < 2) or (championship.format != "league" and len(entries) != championship.capacity):
+        raise HTTPException(409, "Inscreva pelo menos dois times na liga ou preencha as vagas dos demais formatos.")
+    if championship.format == "league":
+        championship.capacity = len(entries)
+    await add_matches(service, championship.id, initial_fixtures(entries, championship.format, championship.home_and_away))
     championship.status = "in_progress"
     await service.flush()
     result = await detail(championship.id, profile, db)
@@ -273,7 +534,19 @@ async def add_action(championship_id, match_id, payload, profile, db):
             raise HTTPException(422, "Escolha um jogador do elenco inscrito deste time.")
         if len(match.actions) >= 5000:
             raise HTTPException(422, "Limite de lances da partida atingido.")
-        match.actions = [*match.actions, {**body, 'player_name': player.name, 'minute': None}]
+        reason = card_error([a['action_type'] for a in match.actions if a['presence_id'] == body['presence_id']], body['action_type'])
+        if reason:
+            raise HTTPException(409, reason)
+        updated = sync_championship_cards(match.id,
+            [*match.actions, {**body, 'player_name': player.name, 'minute': None}])
+        if len(updated) > 5000:
+            raise HTTPException(422, 'Limite de lances da partida atingido, incluindo o vermelho automático.')
+        begin_goalkeeping(match, profile.id)
+        recipient = goal_recipient(match, body)
+        if recipient is not None:
+            keeper = match.home_goalkeeper_id if recipient == match.home_id else match.away_goalkeeper_id
+            updated = [{**a, 'goalkeeper_id': str(keeper) if keeper else None} if a['id'] == body['id'] else a for a in updated]
+        match.actions = updated
     await service.flush()
     result = await detail(championship.id, profile, db)
     await service.commit()
@@ -283,7 +556,9 @@ async def add_action(championship_id, match_id, payload, profile, db):
 async def remove_action(championship_id, match_id, action_id, profile, db):
     service = ChampionshipsService(db)
     championship, match, _ = await editable_match(service, championship_id, match_id, profile)
-    match.actions = [a for a in match.actions if a['id'] != str(action_id)]
+    if any(a['id'] == str(action_id) and a.get('auto_generated', False) for a in match.actions):
+        raise HTTPException(409, 'O vermelho é automático. Remova um dos amarelos para corrigir a expulsão.')
+    match.actions = sync_championship_cards(match.id, [a for a in match.actions if a['id'] != str(action_id)])
     await service.flush()
     result = await detail(championship.id, profile, db)
     await service.commit()
@@ -294,11 +569,25 @@ async def set_goalkeepers(championship_id, match_id, payload, profile, db):
     service = ChampionshipsService(db)
     championship, match, _ = await editable_match(service, championship_id, match_id, profile)
     for field, club_id in [('home_goalkeeper_id', match.home_id), ('away_goalkeeper_id', match.away_id)]:
+        if field not in payload.model_fields_set:
+            continue
         goalkeeper = getattr(payload, field)
         if goalkeeper is not None and await service.registered_profile(championship.id, club_id, goalkeeper) is None:
             raise HTTPException(422, "O goleiro deve pertencer ao elenco inscrito do próprio time.")
-    match.home_goalkeeper_id = payload.home_goalkeeper_id
-    match.away_goalkeeper_id = payload.away_goalkeeper_id
+        if (match.started_at or match.actions) and goalkeeper is None and getattr(match, field) != goalkeeper:
+            raise HTTPException(422, 'Durante a partida, escolha o jogador que entra no gol.')
+    if match.started_at or match.actions:
+        begin_goalkeeping(match, profile.id)
+    for side, club_id in [('home', match.home_id), ('away', match.away_id)]:
+        field = f'{side}_goalkeeper_id'
+        if field not in payload.model_fields_set or getattr(match, field) == getattr(payload, field):
+            continue
+        keeper = getattr(payload, field)
+        if match.started_at:
+            match.goalkeeper_history = [*match.goalkeeper_history, dict(team_id=str(club_id),
+                profile_id=str(keeper), changed_at=datetime.now(timezone.utc).isoformat(), changed_by=str(profile.id))]
+        setattr(match, field, keeper)
+        setattr(match, f'{side}_goalkeeper_override', True)
     await service.flush()
     result = await detail(championship.id, profile, db)
     await service.commit()
@@ -331,6 +620,22 @@ def statistics_from_actions(match, payload):
 async def score(championship_id, match_id, payload, profile, db):
     service = ChampionshipsService(db)
     championship, match, matches = await editable_match(service, championship_id, match_id, profile)
+    if payload.walkover:
+        if payload.winner_id not in (match.home_id, match.away_id):
+            raise HTTPException(422, "Escolha o vencedor por WO.")
+        if match.actions or match.started_at:
+            raise HTTPException(409, "WO deve ser registrado antes de iniciar a partida ou lançar a súmula.")
+        home = 3 if payload.winner_id == match.home_id else 0
+        payload = payload.model_copy(update={'home_score': home, 'away_score': 3 - home, 'statistics': None, 'action_ids': None})
+        match.walkover = True
+        match.home_goalkeeper_id = match.away_goalkeeper_id = None
+        match.goalkeeper_history = []
+    else:
+        begin_goalkeeping(match, profile.id)
+        if not match.actions and len({s['profile_id'] for s in match.goalkeeper_history if s['team_id'] == str(match.home_id)}) > 1 and payload.away_score > 0:
+            raise HTTPException(422, 'Registre os gols na súmula para atribuí-los ao goleiro que atuava no momento.')
+        if not match.actions and len({s['profile_id'] for s in match.goalkeeper_history if s['team_id'] == str(match.away_id)}) > 1 and payload.home_score > 0:
+            raise HTTPException(422, 'Registre os gols na súmula para atribuí-los ao goleiro que atuava no momento.')
     if match.actions or payload.action_ids is not None:
         payload = payload.model_copy(update={'statistics': statistics_from_actions(match, payload)})
     home, away = payload.home_score, payload.away_score
@@ -341,32 +646,13 @@ async def score(championship_id, match_id, payload, profile, db):
         winner = payload.winner_id
     elif payload.winner_id is not None and payload.winner_id != winner:
         raise HTTPException(422, "O vencedor informado não corresponde ao placar.")
-    await save_statistics(service, championship.id, match, payload)
+    if match.walkover:
+        match.statistics_complete = True
+    else:
+        await save_statistics(service, championship.id, match, payload)
     match.home_score, match.away_score, match.winner_id = home, away, winner
-    if championship.format == "cascade":
-        if match.stage == "grand_final":
-            championship.status, championship.champion_id = "finished", winner
-        else:
-            add_matches(service, championship.id, cascade_next(matches), len(matches))
-    elif all(m.home_score is not None for m in matches):
-        if championship.format == "league":
-            entries = [e for e, _ in await service.entries(championship.id)]
-            table = standings(entries, matches, general=True)
-            championship.status, championship.champion_id = "finished", table[0].club_id
-        elif match.stage == "groups":
-            entries = [e for e, _ in await service.entries(championship.id)]
-            pairs = qualified_pairs(entries, matches)
-            add_matches(service, championship.id, [("knockout", 1, None, a, b) for a, b in pairs], len(matches))
-        else:
-            winners = [m.winner_id for m in matches if m.stage == "knockout" and m.round == match.round]
-            if len(winners) == 1:
-                championship.status, championship.champion_id = "finished", winners[0]
-            else:
-                add_matches(service, championship.id, [("knockout", match.round + 1, None, winners[i], winners[i + 1])
-                    for i in range(0, len(winners), 2)], len(matches))
+    await progress_championship(service, championship, matches)
     await service.flush()
-    if championship.status == "finished":
-        await award_championship(service, championship, matches[-1])
     result = await detail(championship.id, profile, db)
     await service.commit()
     return result
@@ -403,16 +689,23 @@ async def save_statistics(service, championship_id, match, payload):
 
 async def award_championship(service, championship, final):
     entries = [e for e, _ in await service.entries(championship.id)]
-    rankings = player_rankings(entries, await service.players(championship.id), await service.statistics(championship.id))
+    rankings = player_rankings(entries, await service.players(championship.id), await service.statistics(championship.id),
+                               await service.matches(championship.id), championship.champion_id)
     complete = all(m.statistics_complete for m in await service.matches(championship.id))
-    runner_up = loser(final)
+    runner_up = loser(final) if final is not None else None
+    if any(e.club_id == runner_up and e.disqualified for e in entries):
+        runner_up = None
     if championship.format == "league":
-        runner_up = standings(entries, await service.matches(championship.id), general=True)[1].club_id
+        eligible_table = [r for r in standings(entries, await service.matches(championship.id), general=True) if not r.disqualified]
+        runner_up = eligible_table[1].club_id if len(eligible_table) > 1 else None
     now = datetime.now(timezone.utc)
+    winners = list(trophy_winners(rankings, championship.champion_id, runner_up, complete))
+    await service.prune_individual_awards(championship.id,
+        [(category, profile_id) for category, profile_id, _ in winners if category not in ('championship_champion', 'championship_runner_up')])
     await service.insert_awards([dict(championship_id=championship.id, profile_id=profile_id,
         category=category, value=value, awarded_at=now,
         title=f"{CATEGORIES[category]} · {championship.name} · {championship.season}")
-        for category, profile_id, value in trophy_winners(rankings, championship.champion_id, runner_up, complete)])
+        for category, profile_id, value in winners])
 
 
 async def create_group(payload, profile, db):
@@ -421,5 +714,51 @@ async def create_group(payload, profile, db):
     service.add(group)
     await service.flush()
     result = CreatedGroup(id=group.id)
+    await service.commit()
+    return result
+
+
+async def edition_awards(service, championship, entries, players, matches):
+    rankings = player_rankings([e for e, _ in entries], players, await service.statistics(championship.id), matches, championship.champion_id)
+    expected = {(category, profile_id) for category, profile_id, _ in trophy_winners(rankings, championship.champion_id, None, True)}
+    result, collective = [], set()
+    roster = {p.profile_id: p.entry_id for p, _ in players}
+    teams = {e.id: (e.club_id, name) for e, name in entries}
+    for trophy, name in await service.awards(championship.id):
+        if trophy.category in ('championship_champion', 'championship_runner_up'):
+            if trophy.category in collective:
+                continue
+            collective.add(trophy.category)
+            name = teams[roster[trophy.profile_id]][1]
+        elif (trophy.category, trophy.profile_id) not in expected:
+            continue
+        result.append(ChampionshipAward(**TrophySchema.model_validate(trophy).model_dump(), profile_id=trophy.profile_id, name=name))
+    return result
+
+
+async def join_club(query, profile, db):
+    service = ChampionshipsService(db)
+    club = await service.club_by_code(query.code)
+    if club is None:
+        raise HTTPException(404, 'Time não encontrado com este código.')
+    member = await service.member(club.id, profile.id)
+    if member is None:
+        service.add(ClubMember(club_id=club.id, profile_id=profile.id, status='requested'))
+    elif member.status == 'declined':
+        member.status = 'requested'
+    await service.commit()
+    return {'id': club.id}
+
+
+async def approve_club_member(club_id, profile_id, payload, profile, db):
+    service = ChampionshipsService(db)
+    club = await require_entity(service, Club, club_id, lock=True)
+    require_owner(club, profile)
+    member = await service.member(club.id, profile_id)
+    if member is None or member.status != 'requested':
+        raise HTTPException(409, 'Pedido pendente não encontrado.')
+    member.status = 'accepted' if payload.accept else 'declined'
+    await service.flush()
+    result = await club_view(service, club, profile)
     await service.commit()
     return result

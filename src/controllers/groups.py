@@ -35,6 +35,8 @@ async def overview(group: PeladaGroup, profile: Profile, db: AsyncSession):
             membership and membership.role in {GroupRole.OWNER, GroupRole.ADMIN}
         ),
     )
+    if result.can_manage:
+        result.group.code = group.code
     if event:
         presence = await service.profile_presence(event, profile)
         count = await service.confirmed_count(event)
@@ -59,6 +61,18 @@ async def overview(group: PeladaGroup, profile: Profile, db: AsyncSession):
             can_change_role=not reason and already and event.min_confirmed_goalkeepers is not None,
             confirmation_message=reason,
         )
+    return result
+
+
+async def rotate_code(group, profile, db):
+    from src.controllers.lifecycle_support import can_manage
+    if not await can_manage(db, group, profile):
+        raise HTTPException(403, 'Somente administradores podem renovar o código.')
+    locked = await GroupsService(db).rotate_code(group.id)
+    await db.flush()
+    await db.refresh(locked)
+    result = await overview(locked, profile, db)
+    await db.commit()
     return result
 
 

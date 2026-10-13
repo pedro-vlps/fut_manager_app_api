@@ -42,7 +42,8 @@ class CascadeBracketTests(unittest.TestCase):
         rows = [PlayerRanking(profile_id=uuid4(), club_id=club, name='A', goals=2, assists=1),
                 PlayerRanking(profile_id=uuid4(), club_id=other, name='B', goals=2, assists=1)]
         awards = list(trophy_winners(rows, club, other, True))
-        self.assertEqual(len(awards), 6)
+        self.assertEqual(len(awards), 4)
+        self.assertEqual({profile_id for category, profile_id, _ in awards if category in ('championship_goals', 'championship_assists')}, {rows[0].profile_id})
         self.assertEqual(len(list(trophy_winners(rows, club, other, False))), 2)
         for row in rows:
             row.goals = row.assists = 0

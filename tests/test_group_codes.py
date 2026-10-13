@@ -66,13 +66,14 @@ class GroupCodeTests(AuthTestCase):
                     profile_id = uuid4()
                     await connection.execute(
                         text(
-                            "INSERT INTO profiles (id,name,email,password_hash,is_active) VALUES (:id,:name,:email,:hash,true)"
+                            "INSERT INTO profiles (id,name,email,email_lookup,password_hash,is_active) VALUES (:id,:name,:email,:lookup,:hash,true)"
                         ),
                         {
                             "id": profile_id,
                             "name": "Teste concorrência",
                             "email": f"{profile_id}@test.invalid",
                             "hash": "test-only",
+                            "lookup": str(profile_id).replace("-", ""),
                         },
                     )
                     return await connection.scalar(

@@ -8,11 +8,66 @@ from src.routers.dependencies import current_profile
 from src.controllers import championships as controller
 from src.schemas.member_profile import MemberProfile
 from src.schemas.championships import (NamedInput, ChampionshipCreate, Invite, Decision, Registration, Score,
-    ClubView, InvitationView, ChampionshipView, ChampionshipDetail, CreatedGroup, ChampionshipCodeQuery, MatchActionInput, MatchGoalkeepers, GroupAssignment)
+    ClubView, ClubTrophy, InvitationView, ChampionshipView, ChampionshipDetail, CreatedGroup, ChampionshipCodeQuery, MatchActionInput, MatchGoalkeepers, GroupAssignment, Punishment, StartingGoalkeeper)
 
 router = APIRouter(tags=["Campeonatos e times"])
 User = Annotated[Profile, Depends(current_profile)]
 DB = Annotated[AsyncSession, Depends(get_db_session)]
+
+
+@router.post('/clubs/{club_id}/goalkeeper', response_model=ClubView)
+async def club_goalkeeper(club_id: UUID, payload: StartingGoalkeeper, profile: User, db: DB):
+    return await controller.set_club_goalkeeper(club_id, payload, profile, db)
+
+
+@router.post('/championships/{championship_id}/clubs/{club_id}/goalkeeper', response_model=ChampionshipDetail)
+async def entry_goalkeeper(championship_id: UUID, club_id: UUID, payload: StartingGoalkeeper, profile: User, db: DB):
+    return await controller.set_entry_goalkeeper(championship_id, club_id, payload, profile, db)
+
+
+@router.post('/championships/{championship_id}/matches/{match_id}/kickoff', response_model=ChampionshipDetail)
+async def kickoff_match(championship_id: UUID, match_id: UUID, profile: User, db: DB):
+    return await controller.kickoff_match(championship_id, match_id, profile, db)
+
+
+@router.get('/clubs/{club_id}/trophies', response_model=list[ClubTrophy])
+async def club_trophies(club_id: UUID, profile: User, db: DB):
+    return await controller.club_trophies(club_id, db)
+
+
+@router.post('/club-discovery/join', response_model=CreatedGroup)
+async def join_club(payload: ChampionshipCodeQuery, profile: User, db: DB):
+    return await controller.join_club(payload, profile, db)
+
+
+@router.post('/clubs/{club_id}/members/{profile_id}/review', response_model=ClubView)
+async def approve_club_member(club_id: UUID, profile_id: UUID, payload: Decision, profile: User, db: DB):
+    return await controller.approve_club_member(club_id, profile_id, payload, profile, db)
+
+
+@router.get('/championship-feed', response_model=list[ChampionshipView])
+async def feed(profile: User, db: DB):
+    return await controller.list_championships(profile, db)
+
+
+@router.post('/championships/{championship_id}/punishments', response_model=ChampionshipDetail)
+async def punish(championship_id: UUID, payload: Punishment, profile: User, db: DB):
+    return await controller.punish(championship_id, payload, profile, db)
+
+
+@router.post('/championships/{championship_id}/groups/draw', response_model=ChampionshipDetail)
+async def random_groups(championship_id: UUID, profile: User, db: DB):
+    return await controller.random_groups(championship_id, profile, db)
+
+
+@router.post('/championships/{championship_id}/code/rotate', response_model=ChampionshipView)
+async def rotate_code(championship_id: UUID, profile: User, db: DB):
+    return await controller.rotate_code(championship_id, profile, db)
+
+
+@router.post('/clubs/{club_id}/code/rotate', response_model=ClubView)
+async def rotate_club_code(club_id: UUID, profile: User, db: DB):
+    return await controller.rotate_club_code(club_id, profile, db)
 
 
 @router.get("/championship-discovery/search", response_model=ChampionshipView)

@@ -17,6 +17,10 @@ from src.services.base import DatabaseService
 
 
 class LifecycleService(DatabaseService):
+    async def person_actions(self, match_id, person):
+        return (await self.db.scalars(select(GameAction).where(GameAction.match_id == match_id,
+            GameAction.player_id == person.profile_id, GameAction.guest_id == person.guest_id)
+            .order_by(GameAction.occurred_at, GameAction.created_at, GameAction.id))).all()
 
     async def event_lineups(self, event):
         return (await self.db.scalars(

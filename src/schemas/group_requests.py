@@ -11,7 +11,7 @@ class GroupCodeQuery(BaseModel):
 class DiscoveredGroup(BaseModel):
     id: UUID
     name: str
-    code: str
+    code: str | None = None
     description: str | None
     membership: Literal["active", "blocked", "none"]
     request_status: Literal["pending", "approved", "rejected"] | None

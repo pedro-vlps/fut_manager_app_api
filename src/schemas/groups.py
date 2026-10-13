@@ -1,13 +1,18 @@
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from pydantic import BaseModel as SCBaseModel, Field
+from pydantic import BaseModel as SCBaseModel, Field, field_validator
 
 
 class PeladaGroupSchema(SCBaseModel):
-    code: str = Field(
-        pattern="^[A-Z0-9]{6}$", description="Código único gerado pelo banco."
-    )
+    code: str | None = None
+
+    @field_validator('code')
+    @classmethod
+    def private_code(cls, value):
+        # O CRUD genérico nunca expõe convites. Controllers de gestão preenchem
+        # explicitamente após verificar o papel do usuário.
+        return None
     id: Optional[UUID] = None
     name: str
     description: Optional[str] = None

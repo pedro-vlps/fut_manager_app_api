@@ -17,6 +17,12 @@ from src.services.base import DatabaseService
 
 
 class GroupsService(DatabaseService):
+    async def rotate_code(self, group_id):
+        from src.models.entities import PeladaGroup
+        group = await self.db.scalar(select(PeladaGroup).where(PeladaGroup.id == group_id).with_for_update())
+        group.code = await self.db.scalar(select(func.generate_group_code()))
+        return group
+
 
     async def event_by_group(self, group_id, event_id, lock=False):
         query = select(PeladaEvent).where(

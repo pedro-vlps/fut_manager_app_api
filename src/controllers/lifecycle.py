@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from random import SystemRandom
 from uuid import UUID
 from fastapi import HTTPException
@@ -28,6 +29,8 @@ from src.schemas.lifecycle import (
 )
 from src.services.lifecycle import LifecycleService
 from src.helpers.lifecycle import require_open, timer_elapsed
+from src.helpers.cards import SECOND_YELLOW_NOTE, automatic_red_id, card_error
+from src.models.enums import GameActionType
 from src.controllers.draw import get_settings as draw_settings
 from src.helpers.team_balance import balanced_teams
 from src.services.team_balance import draw_features
@@ -347,6 +350,9 @@ async def add_action(
         ):
             raise HTTPException(409, "Identificador de lançamento já utilizado.")
         return await snapshot(db, event, True)
+    reason = card_error([a.action_type.value for a in await service.person_actions(match_id, person)], payload.action_type.value)
+    if reason:
+        raise HTTPException(409, reason)
     action = GameAction(
         id=payload.id,
         match_id=match_id,
@@ -359,7 +365,25 @@ async def add_action(
     )
     service.add(action)
     await apply_score(db, action, 1)
+    await service.flush()
+    await sync_player_cards(service, match_id, person)
     return await save(db, event)
+
+
+async def sync_player_cards(service, match_id, person):
+    actions = await service.person_actions(match_id, person)
+    automatic = [a for a in actions if a.notes == SECOND_YELLOW_NOTE and a.action_type == GameActionType.RED_CARD]
+    yellows = [a for a in actions if a.action_type == GameActionType.YELLOW_CARD]
+    direct = any(a.action_type == GameActionType.RED_CARD and a.notes != SECOND_YELLOW_NOTE for a in actions)
+    if len(yellows) < 2 or direct:
+        for red in automatic:
+            await service.delete(red)
+    elif not automatic:
+        second = yellows[1]
+        service.add(GameAction(id=automatic_red_id(match_id, person.profile_id or person.guest_id),
+            match_id=match_id, team_id=second.team_id, player_id=person.profile_id, guest_id=person.guest_id,
+            action_type=GameActionType.RED_CARD, minute=second.minute,
+            occurred_at=second.occurred_at, notes=SECOND_YELLOW_NOTE))
 
 
 async def remove_action(
@@ -372,8 +396,13 @@ async def remove_action(
         return await snapshot(db, event, True)
     if action.match_id != match_id:
         raise HTTPException(404, "Lançamento não encontrado nesta partida.")
+    if action.notes == SECOND_YELLOW_NOTE and action.action_type == GameActionType.RED_CARD:
+        raise HTTPException(409, 'O vermelho é automático. Remova um dos amarelos para corrigir a expulsão.')
+    person = SimpleNamespace(profile_id=action.player_id, guest_id=action.guest_id)
     await apply_score(db, action, -1)
     await service.delete(action)
+    await service.flush()
+    await sync_player_cards(service, match_id, person)
     return await save(db, event)
 
 

@@ -8,7 +8,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
-from src.helpers.passwords import hash_password, verify_password
+from src.helpers.passwords import hash_password, verify_password, needs_rehash
 from src.models.entities import Profile
 from src.models.enums import GroupRole
 from src.schemas.groups import PeladaGroupSchema
@@ -114,6 +114,10 @@ async def login(payload: LoginRequest, response: Response, db: AsyncSession):
     )
     if not valid or profile is None or (not profile.is_active):
         raise HTTPException(status_code=401, detail="E-mail ou senha inválidos.")
+    if needs_rehash(profile.password_hash):
+        profile.password_hash = await run_in_threadpool(hash_password, payload.password)
+        await service.commit()
+        await service.refresh(profile)
     now = datetime.now(timezone.utc)
     token = token_urlsafe(32)
     with _session_lock:
@@ -130,13 +134,17 @@ async def my_groups(response: Response, profile: Profile, db: AsyncSession):
     service = AuthService(db)
     rows = await service.groups_for_profile(profile)
     response.headers["Cache-Control"] = "no-store"
-    return [
+    result = [
         MyGroupResponse(
             **PeladaGroupSchema.model_validate(group).model_dump(),
             role=GroupRole.OWNER if group.created_by_id == profile.id else role,
         )
         for group, role in rows
     ]
+    for item, (group, role) in zip(result, rows):
+        if group.created_by_id == profile.id or role in {GroupRole.OWNER, GroupRole.ADMIN}:
+            item.code = group.code
+    return result
 
 
 async def logout(credentials: HTTPAuthorizationCredentials | None):

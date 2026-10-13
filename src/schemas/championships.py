@@ -1,5 +1,6 @@
 from typing import Annotated, Literal
 from uuid import UUID
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from src.schemas.trophies import TrophySchema
 
@@ -18,12 +19,14 @@ class ChampionshipCreate(NamedInput):
     season: Name
     description: str | None = Field(default=None, max_length=2000)
     format: Literal["groups_knockout", "knockout", "cascade", "league"]
-    capacity: Literal[4, 8, 12, 16]
+    capacity: int = Field(ge=2, strict=True)
     home_and_away: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def cascade_capacity(self):
-        if self.capacity == 12 and self.format != "groups_knockout":
+        if self.format != "league" and self.capacity not in (4, 8, 12, 16):
+            raise ValueError("Este formato permite 4, 8, 12 ou 16 times.")
+        if self.capacity == 12 and self.format not in ("groups_knockout", "league"):
             raise ValueError("12 times está disponível somente para grupos + mata-mata.")
         if self.format == "cascade" and self.capacity != 4:
             raise ValueError("Cascata permite somente 4 times.")
@@ -61,6 +64,21 @@ class Score(Input):
     winner_id: UUID | None = None
     statistics: list[PlayerStatistic] | None = Field(default=None, max_length=200)
     action_ids: list[UUID] | None = Field(default=None, max_length=5000)
+    walkover: bool = False
+
+
+class Punishment(Input):
+    club_ids: list[UUID] = Field(min_length=1)
+    kind: Literal['disqualification', 'points']
+    points: int = Field(default=0, ge=0, strict=True)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ClubTrophy(BaseModel):
+    championship_id: UUID
+    name: str
+    season: str
+    category: str
 
 
 class MatchActionInput(Input):
@@ -75,9 +93,22 @@ class MatchGoalkeepers(Input):
     away_goalkeeper_id: UUID | None = None
 
 
+class StartingGoalkeeper(Input):
+    goalkeeper_id: UUID | None
+
+
+class GoalkeeperStint(BaseModel):
+    team_id: UUID
+    profile_id: UUID | None
+    changed_at: datetime
+    changed_by: UUID
+
+
 class MatchActionView(MatchActionInput):
     player_name: str
     minute: int | None = None
+    auto_generated: bool = False
+    goalkeeper_id: UUID | None = None
 
 
 class Person(BaseModel):
@@ -91,6 +122,9 @@ class ClubView(BaseModel):
     name: str
     owner_id: UUID
     members: list[Person]
+    code: str | None = None
+    trophies: list[ClubTrophy] = Field(default_factory=list)
+    starting_goalkeeper_id: UUID | None = None
 
 
 class InvitationView(BaseModel):
@@ -102,7 +136,7 @@ class InvitationView(BaseModel):
 class ChampionshipView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
-    code: str
+    code: str | None = None
     name: str
     season: str
     description: str | None
@@ -121,6 +155,11 @@ class EntryView(BaseModel):
     seed: int
     pool: str | None = None
     players: list[Person]
+    disqualified: bool = False
+    points_deducted: int = 0
+    punishments: list[dict] = Field(default_factory=list)
+    owner_id: UUID | None = None
+    starting_goalkeeper_id: UUID | None = None
 
 
 class MatchView(BaseModel):
@@ -139,6 +178,12 @@ class MatchView(BaseModel):
     away_goalkeeper_id: UUID | None = None
     statistics_complete: bool
     actions: list[MatchActionView] = Field(default_factory=list)
+    walkover: bool = False
+    bracket_size: int | None = None
+    started_at: datetime | None = None
+    goalkeeper_history: list[GoalkeeperStint] = Field(default_factory=list)
+    home_goalkeeper_override: bool = False
+    away_goalkeeper_override: bool = False
 
 
 class PlayerRanking(BaseModel):
@@ -154,6 +199,7 @@ class PlayerRanking(BaseModel):
     goals_conceded: int = 0
     matches: int = 0
     goalkeeper_matches: int = 0
+    team_position: int = 0
 
 
 class ChampionshipAward(TrophySchema):
@@ -172,6 +218,7 @@ class Standing(BaseModel):
     wins: int = 0
     draws: int = 0
     losses: int = 0
+    disqualified: bool = False
 
 
 class ChampionshipDetail(ChampionshipView):

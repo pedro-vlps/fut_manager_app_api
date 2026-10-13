@@ -5,18 +5,21 @@ from sqlalchemy import Boolean, DateTime, CheckConstraint, ForeignKey, FetchedVa
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 from src.models.base import Base, UUIDTimestampMixin
+from src.models.privacy import EncryptedJSON
 
 
 class Club(UUIDTimestampMixin, Base):
     __tablename__ = "clubs"
     name: Mapped[str] = mapped_column(String(80))
     owner_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"))
+    code: Mapped[str] = mapped_column(String(6), unique=True, server_default=FetchedValue())
+    starting_goalkeeper_id: Mapped[UUID | None] = mapped_column(ForeignKey('profiles.id'))
 
 
 class ClubMember(UUIDTimestampMixin, Base):
     __tablename__ = "club_members"
     __table_args__ = (UniqueConstraint("club_id", "profile_id"),
-                     CheckConstraint("status IN ('pending', 'accepted', 'declined')", name="club_member_status"))
+                     CheckConstraint("status IN ('pending', 'accepted', 'declined', 'requested')", name="club_member_status"))
     club_id: Mapped[UUID] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"))
     profile_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"))
     status: Mapped[str] = mapped_column(String(16), default="pending")
@@ -26,8 +29,8 @@ class Championship(UUIDTimestampMixin, Base):
     __tablename__ = "championships"
     __table_args__ = (
         UniqueConstraint("code", name="championships_code_unique"),
-        CheckConstraint("capacity IN (4, 8, 12, 16)", name="championship_capacity"),
-        CheckConstraint("capacity <> 12 OR format = 'groups_knockout'", name="twelve_teams_groups"),
+        CheckConstraint("(format = 'league' AND capacity >= 2) OR (format <> 'league' AND capacity IN (4, 8, 12, 16))", name="championship_capacity"),
+        CheckConstraint("capacity <> 12 OR format IN ('groups_knockout', 'league')", name="twelve_teams_groups"),
         CheckConstraint("format <> 'cascade' OR capacity = 4", name="cascade_four_teams"),
         CheckConstraint("format IN ('groups_knockout', 'knockout', 'cascade', 'league')", name="championship_format"),
         CheckConstraint("NOT home_and_away OR format = 'league'", name="league_home_and_away"),
@@ -52,6 +55,10 @@ class ChampionshipEntry(UUIDTimestampMixin, Base):
     club_id: Mapped[UUID] = mapped_column(ForeignKey("clubs.id"))
     seed: Mapped[int] = mapped_column(Integer)
     pool: Mapped[str | None] = mapped_column(String(1))
+    starting_goalkeeper_id: Mapped[UUID | None] = mapped_column(ForeignKey('profiles.id'))
+    disqualified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    points_deducted: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    punishments: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
 
 
 class ChampionshipPlayer(UUIDTimestampMixin, Base):
@@ -79,8 +86,13 @@ class ChampionshipMatch(UUIDTimestampMixin, Base):
     winner_id: Mapped[UUID | None] = mapped_column(ForeignKey("clubs.id"))
     home_goalkeeper_id: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
     away_goalkeeper_id: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    home_goalkeeper_override: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text('false'))
+    away_goalkeeper_override: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text('false'))
+    goalkeeper_history: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
     statistics_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
-    actions: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    walkover: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    actions: Mapped[list] = mapped_column(EncryptedJSON(), default=list)
 
 
 class ChampionshipStatistic(UUIDTimestampMixin, Base):

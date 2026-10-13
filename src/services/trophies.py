@@ -22,7 +22,12 @@ class TrophiesService(DatabaseService):
         memberships = select(GroupMember.group_id).where(GroupMember.profile_id == profile_id)
         played = select(PeladaEvent.group_id).join(Match, Match.event_id == PeladaEvent.id).join(
             MatchLineup, MatchLineup.match_id == Match.id).where(MatchLineup.profile_id == profile_id)
-        archived = select(GroupSeason.group_id).where(GroupSeason.archived_rankings.contains([{"id": str(profile_id)}]))
+        # A busca JSON no SQL não é compatível com snapshots cifrados. Resolve
+        # a participação após a decifragem, sem comparar dados em texto no banco.
+        snapshots = (await self.db.scalars(select(GroupSeason).where(GroupSeason.archived_rankings.is_not(None)))).all()
+        archived = {season.group_id for season in snapshots if any(
+            str(row.get('id')) == str(profile_id) and not row.get('is_guest', False)
+            for row in (season.archived_rankings or []))}
         return (await self.db.scalars(select(PeladaGroup).where(or_(
             PeladaGroup.id.in_(memberships), PeladaGroup.id.in_(played), PeladaGroup.id.in_(archived)
         )).order_by(PeladaGroup.id))).all()
