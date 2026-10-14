@@ -28,6 +28,7 @@ from src.schemas.lifecycle import (
     TemporaryPlayerRequest,
 )
 from src.services.lifecycle import LifecycleService
+from src.schemas.registration_window import validate_registration_window
 from src.helpers.lifecycle import require_open, timer_elapsed
 from src.helpers.cards import SECOND_YELLOW_NOTE, automatic_red_id, card_error
 from src.models.enums import GameActionType
@@ -278,7 +279,8 @@ async def start(event: PeladaEvent, db: AsyncSession):
         )
     event.status = EventStatus.IN_PROGRESS
     event.started_at = datetime.now(timezone.utc)
-    event.registration_closes_at = event.started_at
+    # O status encerra as confirmações; mantém o prazo configurado para a próxima semana.
+    event.registration_closes_at = event.registration_closes_at or event.scheduled_at
     return await save(db, event)
 
 
@@ -502,6 +504,18 @@ async def update_modality(payload, event, db):
     if event.status == EventStatus.IN_PROGRESS:
         raise HTTPException(409, "A modalidade só pode ser alterada antes de iniciar o evento.")
     event.modality = payload.modality
+    return await save(db, event)
+
+
+async def update_registration_opening(payload, event, db):
+    service = LifecycleService(db)
+    if event.status == EventStatus.IN_PROGRESS or await service.first_match_id(event):
+        raise HTTPException(409, "A abertura das confirmações só pode ser alterada antes de iniciar o evento.")
+    try:
+        validate_registration_window(event.scheduled_at, payload.registration_opens_at, event.registration_closes_at)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    event.registration_opens_at = payload.registration_opens_at
     return await save(db, event)
 
 

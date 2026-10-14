@@ -1,8 +1,12 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel as SCBaseModel
 from src.models.enums import GroupRole, MembershipStatus
+
+
+class GroupMemberRoleRequest(SCBaseModel):
+    role: Literal["admin", "member"]
 
 
 class GroupMemberSchema(SCBaseModel):

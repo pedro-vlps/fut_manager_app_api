@@ -20,7 +20,8 @@ async def schedule(payload, group, profile, db):
     existing = await service.get(PeladaEvent, payload.id)
     if existing:
         if any(getattr(existing, key) != getattr(payload, key) for key in (
-            "max_confirmed_players", "min_confirmed_goalkeepers", "max_confirmed_goalkeepers"
+            "max_confirmed_players", "min_confirmed_goalkeepers", "max_confirmed_goalkeepers",
+            "registration_opens_at", "registration_closes_at",
         )):
             raise HTTPException(409, "Este identificador já foi usado. Atualize a tela.")
         if (existing.group_id, existing.created_by_id, existing.title, existing.scheduled_at,
@@ -50,11 +51,15 @@ async def schedule_next(db, event):
     if await service.successor(event):
         return
     next_date = event.scheduled_at.astimezone(ZoneInfo(event.schedule_timezone)) + timedelta(weeks=1)
+    def next_window(value):
+        return value.astimezone(ZoneInfo(event.schedule_timezone)) + timedelta(weeks=1) if value else None
     service.add(PeladaEvent(group_id=event.group_id, created_by_id=event.created_by_id,
         modality=event.modality, title=event.title, location=event.location, scheduled_at=next_date,
         min_confirmed_players=event.min_confirmed_players, max_confirmed_players=event.max_confirmed_players,
         min_confirmed_goalkeepers=event.min_confirmed_goalkeepers,
         max_confirmed_goalkeepers=event.max_confirmed_goalkeepers,
         match_duration_minutes=event.match_duration_minutes,
+        registration_opens_at=next_window(event.registration_opens_at),
+        registration_closes_at=next_window(event.registration_closes_at),
         recurring_weekly=True, schedule_timezone=event.schedule_timezone, recurrence_parent_id=event.id,
         status=EventStatus.REGISTRATION_OPEN))

@@ -3,6 +3,7 @@
 Execute com as dependências/configurações da API: python -m scripts.export_database_schema
 """
 import ast
+import re
 from pathlib import Path
 import src
 
@@ -41,7 +42,11 @@ SET LOCAL search_path TO public;
 '''
     parts = [header, '\n\n'.join(statements)]
     for migration in migrations:
-        parts.append(f'\n-- Complemento: {migration}\n' + (scripts / migration).read_text(encoding='utf-8-sig'))
+        sql = (scripts / migration).read_text(encoding='utf-8-sig')
+        # As migrations podem ter sua própria transação quando executadas isoladamente.
+        # No bootstrap, todas fazem parte da mesma transação externa.
+        sql = re.sub(r'(?m)^[ \t]*(?:BEGIN|COMMIT);[ \t]*\r?\n?', '', sql)
+        parts.append(f'\n-- Complemento: {migration}\n' + sql)
     parts.append('\nCOMMIT;\n')
     destination = scripts / 'create_database.sql'
     destination.write_text('\n'.join(line.rstrip() for line in '\n\n'.join(parts).splitlines()) + '\n', encoding='utf-8')

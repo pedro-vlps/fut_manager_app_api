@@ -10,6 +10,7 @@ from src.models.entities import (
     MatchLineup,
     MatchTeam,
     PeladaEvent,
+    PeladaGroup,
     Profile,
 )
 from src.models.enums import EventStatus, MembershipStatus, MatchStatus, PresenceStatus, TeamPlayerRole
@@ -17,8 +18,17 @@ from src.services.base import DatabaseService
 
 
 class GroupsService(DatabaseService):
+    async def locked_group(self, group_id):
+        return await self.db.scalar(select(PeladaGroup).where(PeladaGroup.id == group_id)
+            .with_for_update().execution_options(populate_existing=True))
+
+    async def member_for_role(self, group_id, profile_id):
+        return await self.db.scalar(select(GroupMember).where(
+            GroupMember.group_id == group_id, GroupMember.profile_id == profile_id,
+            GroupMember.status == MembershipStatus.ACTIVE,
+        ).with_for_update().execution_options(populate_existing=True))
+
     async def rotate_code(self, group_id):
-        from src.models.entities import PeladaGroup
         group = await self.db.scalar(select(PeladaGroup).where(PeladaGroup.id == group_id).with_for_update())
         group.code = await self.db.scalar(select(func.generate_group_code()))
         return group

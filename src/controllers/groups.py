@@ -193,6 +193,27 @@ async def members(group: PeladaGroup, db: AsyncSession):
     )
 
 
+async def update_member_role(group, profile_id, payload, profile, db):
+    if group.created_by_id != profile.id:
+        raise HTTPException(403, "Somente o dono da pelada pode definir administradores.")
+    service = GroupsService(db)
+    group = await service.locked_group(group.id)
+    if group is None:
+        raise HTTPException(404, "Grupo não encontrado.")
+    if group.created_by_id != profile.id:
+        raise HTTPException(403, "Somente o dono da pelada pode definir administradores.")
+    if profile_id == group.created_by_id:
+        raise HTTPException(422, "O cargo do dono da pelada não pode ser alterado.")
+    member = await service.member_for_role(group.id, profile_id)
+    if member is None:
+        raise HTTPException(404, "Membro ativo não encontrado nesta pelada.")
+    member.role = GroupRole(payload.role)
+    await service.flush()
+    result = await members(group, db)
+    await service.commit()
+    return result
+
+
 async def rankings(group: PeladaGroup, db: AsyncSession):
     from src.controllers.seasons import current_rankings
     return (await current_rankings(group, db)).rankings

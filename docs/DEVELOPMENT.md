@@ -540,6 +540,37 @@ psql -h HOST -U USUARIO -d NOME_DO_BANCO -v ON_ERROR_STOP=1 -f src/databases/scr
 
 O script é transacional e destinado apenas à primeira criação: não o reaplique em um banco existente. IDs e valores definidos como defaults Python são preenchidos pela API. Para atualizar o arquivo após mudanças nos modelos/bootstrap, execute `python -m scripts.export_database_schema` no ambiente configurado da API; a geração não lê dados do banco.
 
+## Apagar os dados de teste e recriar o esquema atual
+
+Pare a API e conecte-se ao banco da aplicação usando o mesmo usuário proprietário
+configurado no deploy. Execute estes arquivos inteiros, nesta ordem:
+
+```bash
+psql -h HOST -U USUARIO -d NOME_DO_BANCO -v ON_ERROR_STOP=1 -f src/databases/scripts/drop_database.sql
+psql -h HOST -U USUARIO -d NOME_DO_BANCO -v ON_ERROR_STOP=1 -f src/databases/scripts/create_database.sql
+```
+
+Também é possível executar o conteúdo de cada arquivo no editor SQL do provedor.
+O primeiro apaga o esquema `public` inteiro e o recria vazio. Todas as contas,
+times, campeonatos, partidas, rankings e troféus são removidos, assim como enums,
+funções, sequências e gatilhos. Objetos de outras aplicações no mesmo esquema
+também seriam removidos. O nome do banco, as credenciais e o serviço PostgreSQL
+são mantidos; outros esquemas não são alterados.
+
+O segundo cria as 26 tabelas e os complementos do bootstrap atual da API,
+incluindo números de camisa de 0 a 100, goleiros titulares e criptografia.
+Ele não insere usuários nem dados de demonstração. Não é necessário aplicar
+as migrações separadamente depois dele. Toda a criação ocorre numa única
+transação; em caso de erro, o esquema continua vazio e o arquivo pode ser
+executado novamente após corrigir a causa.
+
+Antes de reiniciar a API, configure `FUT_MANAGER_PERSONAL_DATA_KEYS` como lista
+JSON de chaves Fernet e `FUT_MANAGER_EMAIL_LOOKUP_KEY` com um segredo aleatório
+de pelo menos 32 caracteres. Mantenha os mesmos valores nos próximos deploys.
+Use `FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP=false` após a criação manual e publique
+a versão atual do app. Limpe a sessão antiga no app e cadastre uma nova conta:
+os usuários anteriores foram apagados.
+
 ## Documentação da API no deploy
 
 Configure `FUT_MANAGER_DOCS_ENABLED=false` em produção para desativar `/docs`, `/redoc`, `/openapi.json` e o redirecionamento OAuth do Swagger. As rotas normais da API continuam disponíveis. A configuração é independente de `FUT_MANAGER_DEBUG` e, sem a variável, o padrão da aplicação é `false`.
@@ -598,6 +629,46 @@ a API atualizada. Ela amplia a restrição de capacidade e adiciona a coluna
 opcional de grupo, preservando os dados. Com `FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP=true`,
 o bootstrap aplica a migração automaticamente. O arquivo `create_database.sql`
 atualizado é somente para bancos novos.
+
+## Administradores da pelada
+
+Em **Membros do grupo**, o dono pode tornar um jogador administrador ou remover
+esse cargo. O dono permanece como organizador e seu cargo não pode ser alterado.
+Administradores podem gerenciar eventos, times, partidas e pedidos de entrada;
+somente o dono pode definir os cargos de outros membros.
+
+`POST /my-groups/{group_id}/members/{profile_id}/role` recebe `role: "admin"`
+ou `role: "member"` e retorna a lista atualizada de membros. Exige autenticação,
+acesso ao grupo e que o usuário seja seu criador (`created_by_id`). O jogador
+precisa ser membro ativo daquele grupo. A mudança não altera presenças ou elencos.
+As permissões são consultadas no banco a cada requisição, portanto o novo cargo
+vale na próxima operação, sem novo login. Não é necessária migração: o campo
+`group_members.role` já existe. O CRUD genérico continua bloqueado para escritas
+de membros.
+
+## Abertura das confirmações
+
+No agendamento, escolha abertura imediata, dia da semana e hora (ex.: quarta às
+21h), ou data e hora. A escolha por dia da semana usa a última ocorrência antes
+do prazo de confirmação do evento e mostra a data calculada antes de salvar.
+Todos os horários seguem `schedule_timezone`, independentemente do fuso do aparelho.
+
+`POST /my-groups/{group_id}/schedule` aceita `registration_opens_at` e
+`registration_closes_at` como timestamps com fuso. O horário de abertura é
+opcional; `null` mantém a abertura imediata. A abertura deve anteceder tanto o
+prazo final quanto o início do evento; o prazo final deve ser até o início.
+
+Administradores e donos podem editar a abertura de eventos existentes antes de
+iniciá-los usando `POST /my-groups/{group_id}/events/{event_id}/registration-opening`,
+com `registration_opens_at` ou `null` para remover a restrição. A edição preserva
+vagas, times, confirmações existentes e o prazo final. Novas confirmações ficam
+bloqueadas na API até a abertura, inclusive quando feitas fora do app.
+
+Em eventos semanais, o sucessor mantém abertura e prazo no mesmo dia e hora
+local da semana seguinte. O início do evento não sobrescreve o prazo configurado.
+O app mostra os horários aos jogadores e atualiza a permissão de confirmação ao
+atingir a abertura ou o prazo final. Não é necessária nova migração: as colunas
+`registration_opens_at` e `registration_closes_at` já existem no esquema atual.
 
 ## Números das camisas
 

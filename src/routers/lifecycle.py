@@ -16,6 +16,7 @@ from src.schemas.lifecycle import (
 from src.controllers import lifecycle as controller
 from src.schemas.events import ConfirmationSettings
 from src.schemas.jersey_numbers import JerseyNumberRequest
+from src.schemas.registration_window import RegistrationOpeningRequest
 from src.routers.dependencies import current_profile, accessible_group, managed_event
 
 router = APIRouter(
@@ -39,6 +40,15 @@ async def update_confirmation_settings(
     db: AsyncSession = Depends(get_db_session),
 ):
     return await controller.update_confirmation_settings(payload, event, db)
+
+
+@router.post("/registration-opening", response_model=LifecycleView)
+async def update_registration_opening(
+    payload: RegistrationOpeningRequest,
+    event: PeladaEvent = Depends(managed_event),
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await controller.update_registration_opening(payload, event, db)
 
 
 @router.post("/matches/{match_id}/temporary-players", response_model=LifecycleView)

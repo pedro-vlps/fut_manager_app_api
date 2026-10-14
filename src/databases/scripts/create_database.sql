@@ -874,16 +874,13 @@ ALTER TABLE championship_matches ADD COLUMN IF NOT EXISTS actions JSONB NOT NULL
 
 
 -- Complemento: migrations/021_league_championships.sql
-BEGIN;
 ALTER TABLE championships DROP CONSTRAINT IF EXISTS ck_championships_championship_format;
 ALTER TABLE championships ADD CONSTRAINT ck_championships_championship_format
     CHECK (format IN ('groups_knockout', 'knockout', 'cascade', 'league'));
-COMMIT;
 
 
 
 -- Complemento: migrations/022_league_home_and_away.sql
-BEGIN;
 ALTER TABLE championships ADD COLUMN IF NOT EXISTS home_and_away BOOLEAN NOT NULL DEFAULT false;
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -893,20 +890,16 @@ DO $$ BEGIN
             CHECK (NOT home_and_away OR format = 'league');
     END IF;
 END $$;
-COMMIT;
 
 
 
 -- Complemento: migrations/023_championship_goalkeepers.sql
-BEGIN;
 ALTER TABLE championship_matches ADD COLUMN IF NOT EXISTS home_goalkeeper_id UUID REFERENCES profiles(id);
 ALTER TABLE championship_matches ADD COLUMN IF NOT EXISTS away_goalkeeper_id UUID REFERENCES profiles(id);
-COMMIT;
 
 
 
 -- Complemento: migrations/024_championship_groups.sql
-BEGIN;
 ALTER TABLE championships DROP CONSTRAINT IF EXISTS ck_championships_championship_capacity;
 ALTER TABLE championships ADD CONSTRAINT ck_championships_championship_capacity
     CHECK (capacity IN (4, 8, 12, 16));
@@ -914,12 +907,10 @@ ALTER TABLE championships DROP CONSTRAINT IF EXISTS ck_championships_twelve_team
 ALTER TABLE championships ADD CONSTRAINT ck_championships_twelve_teams_groups
     CHECK (capacity <> 12 OR format = 'groups_knockout');
 ALTER TABLE championship_entries ADD COLUMN IF NOT EXISTS pool VARCHAR(1);
-COMMIT;
 
 
 
 -- Complemento: migrations/025_championship_feedback.sql
-BEGIN;
 ALTER TABLE championships DROP CONSTRAINT IF EXISTS ck_championships_championship_capacity;
 ALTER TABLE championships DROP CONSTRAINT IF EXISTS ck_championships_twelve_teams_groups;
 ALTER TABLE championships ADD CONSTRAINT ck_championships_championship_capacity
@@ -952,13 +943,11 @@ ALTER TABLE clubs ALTER COLUMN code SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS ix_clubs_code ON clubs(code);
 ALTER TABLE club_members DROP CONSTRAINT IF EXISTS ck_club_members_club_member_status;
 ALTER TABLE club_members ADD CONSTRAINT ck_club_members_club_member_status CHECK (status IN ('pending','accepted','declined','requested'));
-COMMIT;
 
 
 
 -- Complemento: migrations/026_personal_data_encryption.sql
 -- Pare as escritas, aplique este SQL, configure as chaves e execute encrypt_personal_data.py.
-BEGIN;
 DROP INDEX IF EXISTS profiles_email_lower_unique;
 ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_email_key;
 ALTER TABLE profiles DROP CONSTRAINT IF EXISTS uq_profiles_email;
@@ -971,12 +960,10 @@ ALTER TABLE group_guests ALTER COLUMN name TYPE TEXT;
 ALTER TABLE championship_matches ALTER COLUMN actions DROP DEFAULT;
 ALTER TABLE championship_matches ALTER COLUMN actions TYPE TEXT USING actions::text;
 ALTER TABLE group_seasons ALTER COLUMN archived_rankings TYPE TEXT USING archived_rankings::text;
-COMMIT;
 
 
 
 -- Complemento: migrations/027_starting_goalkeepers.sql
-BEGIN;
 ALTER TABLE clubs ADD COLUMN IF NOT EXISTS starting_goalkeeper_id UUID REFERENCES profiles(id);
 ALTER TABLE championship_entries ADD COLUMN IF NOT EXISTS starting_goalkeeper_id UUID REFERENCES profiles(id);
 ALTER TABLE championship_matches ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
@@ -995,7 +982,6 @@ UPDATE championship_matches SET away_goalkeeper_override = true
 -- Súmulas já iniciadas continuam protegidas contra mudanças feitas pelos times.
 UPDATE championship_matches SET started_at = created_at WHERE started_at IS NULL
  AND home_score IS NULL AND actions IS NOT NULL AND actions <> '[]' AND actions NOT LIKE 'enc:v1:%';
-COMMIT;
 
 
 

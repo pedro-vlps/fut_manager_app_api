@@ -6,6 +6,7 @@ from src.models.entities import PeladaGroup, Profile
 from src.schemas.presences import EventPresenceSchema, ConfirmRequest
 from src.schemas.events import PeladaEventSchema
 from src.schemas.member_profile import MemberProfile
+from src.schemas.members import GroupMemberRoleRequest
 from src.schemas.groups import GroupOverview, Person, ConfirmedPerson, RankingEntry
 from src.controllers import groups as controller
 from src.controllers.rankings import general_standings as calculate_standings
@@ -93,6 +94,16 @@ async def members(
     db: AsyncSession = Depends(get_db_session),
 ):
     return await controller.members(group, db)
+
+
+@router.post("/{group_id}/members/{profile_id}/role", response_model=list[Person])
+async def update_member_role(
+    profile_id: UUID, payload: GroupMemberRoleRequest,
+    group: PeladaGroup = Depends(accessible_group),
+    profile: Profile = Depends(current_profile),
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await controller.update_member_role(group, profile_id, payload, profile, db)
 
 
 @router.get("/{group_id}/rankings", response_model=list[RankingEntry])
