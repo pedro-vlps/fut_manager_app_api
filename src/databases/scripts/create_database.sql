@@ -84,11 +84,13 @@ CREATE TABLE club_members (
 	club_id UUID NOT NULL,
 	profile_id UUID NOT NULL,
 	status VARCHAR(16) NOT NULL,
+	jersey_number INTEGER,
 	id UUID NOT NULL,
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
 	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
 	CONSTRAINT pk_club_members PRIMARY KEY (id),
 	CONSTRAINT uq_club_members_club_id UNIQUE (club_id, profile_id),
+	CONSTRAINT ck_club_members_jersey_number_range CHECK (jersey_number BETWEEN 0 AND 100),
 	CONSTRAINT ck_club_members_club_member_status CHECK (status IN ('pending', 'accepted', 'declined', 'requested')),
 	CONSTRAINT fk_club_members_club_id_clubs FOREIGN KEY(club_id) REFERENCES clubs (id) ON DELETE CASCADE,
 	CONSTRAINT fk_club_members_profile_id_profiles FOREIGN KEY(profile_id) REFERENCES profiles (id)
@@ -346,9 +348,9 @@ CREATE TABLE event_presences (
 	CONSTRAINT fk_event_presences_guest_id_group_guests FOREIGN KEY(guest_id) REFERENCES group_guests (id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX uq_event_presences_waitlist_position ON event_presences (event_id, waitlist_position) WHERE status = 'WAITLIST' AND waitlist_position IS NOT NULL;
-
 CREATE INDEX ix_event_presences_event_status ON event_presences (event_id, status);
+
+CREATE UNIQUE INDEX uq_event_presences_waitlist_position ON event_presences (event_id, waitlist_position) WHERE status = 'WAITLIST' AND waitlist_position IS NOT NULL;
 
 CREATE TABLE event_teams (
 	event_id UUID NOT NULL,
@@ -398,10 +400,12 @@ CREATE TABLE event_team_players (
 	profile_id UUID,
 	guest_id UUID,
 	role team_player_role NOT NULL,
+	jersey_number INTEGER,
 	id UUID NOT NULL,
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
 	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
 	CONSTRAINT pk_event_team_players PRIMARY KEY (id),
+	CONSTRAINT ck_event_team_players_jersey_number_range CHECK (jersey_number BETWEEN 0 AND 100),
 	CONSTRAINT uq_event_team_player_profile UNIQUE (team_id, profile_id),
 	CONSTRAINT uq_event_team_player_guest UNIQUE (team_id, guest_id),
 	CONSTRAINT ck_event_team_players_profile_or_guest_team_player CHECK ((profile_id IS NOT NULL AND guest_id IS NULL) OR (profile_id IS NULL AND guest_id IS NOT NULL)),
@@ -992,6 +996,25 @@ UPDATE championship_matches SET away_goalkeeper_override = true
 UPDATE championship_matches SET started_at = created_at WHERE started_at IS NULL
  AND home_score IS NULL AND actions IS NOT NULL AND actions <> '[]' AND actions NOT LIKE 'enc:v1:%';
 COMMIT;
+
+
+
+-- Complemento: migrations/028_jersey_numbers.sql
+-- Número opcional por jogador no elenco; 0 e 100 são válidos.
+ALTER TABLE event_team_players ADD COLUMN IF NOT EXISTS jersey_number INTEGER;
+ALTER TABLE club_members ADD COLUMN IF NOT EXISTS jersey_number INTEGER;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_event_team_players_jersey_number_range') THEN
+        ALTER TABLE event_team_players ADD CONSTRAINT ck_event_team_players_jersey_number_range
+            CHECK (jersey_number BETWEEN 0 AND 100);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_club_members_jersey_number_range') THEN
+        ALTER TABLE club_members ADD CONSTRAINT ck_club_members_jersey_number_range
+            CHECK (jersey_number BETWEEN 0 AND 100);
+    END IF;
+END $$;
 
 
 

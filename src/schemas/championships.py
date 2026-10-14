@@ -112,6 +112,7 @@ class MatchActionView(MatchActionInput):
 
 
 class Person(BaseModel):
+    jersey_number: int | None = None
     id: UUID
     name: str
     status: str

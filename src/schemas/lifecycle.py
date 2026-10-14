@@ -5,9 +5,11 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from src.models.enums import GameActionType, TeamPlayerRole
 from src.schemas.events import PeladaEventSchema
+from src.schemas.jersey_numbers import JerseyNumber
 
 
 class PlayerSelection(BaseModel):
+    jersey_number: JerseyNumber | None = None
     presence_id: UUID
     role: TeamPlayerRole = TeamPlayerRole.PLAYER
 
@@ -57,6 +59,7 @@ class TimerRequest(BaseModel):
 
 
 class Participant(BaseModel):
+    jersey_number: JerseyNumber | None = None
     positions: list[str] = Field(default_factory=list)
     presence_id: UUID
     person_id: UUID

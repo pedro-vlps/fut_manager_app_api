@@ -61,7 +61,7 @@ async def snapshot(db, event, manager):
             name=t.name,
             color=t.color,
             players=[
-                person_map[p.profile_id, p.guest_id].model_copy(update={"role": p.role})
+                person_map[p.profile_id, p.guest_id].model_copy(update={"role": p.role, "jersey_number": p.jersey_number})
                 for p in players
                 if p.team_id == t.id and (p.profile_id, p.guest_id) in person_map
             ],
@@ -73,6 +73,7 @@ async def snapshot(db, event, manager):
     actions = await service.event_actions(event)
     lineups = await service.event_lineups(event)
     original_teams = {(p.profile_id, p.guest_id): p.team_id for p in players}
+    numbers = {(p.profile_id, p.guest_id): p.jersey_number for p in players}
     now = datetime.now(timezone.utc)
     views = [
         MatchView(
@@ -82,7 +83,8 @@ async def snapshot(db, event, manager):
             advancing_team_id=m.advancing_team_id,
             players=[
                 MatchParticipant(
-                    **person_map[p.profile_id, p.guest_id].model_dump(exclude={"role"}),
+                    **person_map[p.profile_id, p.guest_id].model_dump(exclude={"role", "jersey_number"}),
+                    jersey_number=numbers.get((p.profile_id, p.guest_id)),
                     role=p.role,
                     team_id=p.team_id,
                     is_active=p.is_active,

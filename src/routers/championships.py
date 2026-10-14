@@ -7,12 +7,18 @@ from src.models.entities import Profile
 from src.routers.dependencies import current_profile
 from src.controllers import championships as controller
 from src.schemas.member_profile import MemberProfile
+from src.schemas.jersey_numbers import JerseyNumberRequest
 from src.schemas.championships import (NamedInput, ChampionshipCreate, Invite, Decision, Registration, Score,
     ClubView, ClubTrophy, InvitationView, ChampionshipView, ChampionshipDetail, CreatedGroup, ChampionshipCodeQuery, MatchActionInput, MatchGoalkeepers, GroupAssignment, Punishment, StartingGoalkeeper)
 
 router = APIRouter(tags=["Campeonatos e times"])
 User = Annotated[Profile, Depends(current_profile)]
 DB = Annotated[AsyncSession, Depends(get_db_session)]
+
+
+@router.post('/clubs/{club_id}/members/{profile_id}/jersey-number', response_model=ClubView)
+async def club_jersey_number(club_id: UUID, profile_id: UUID, payload: JerseyNumberRequest, profile: User, db: DB):
+    return await controller.set_club_jersey_number(club_id, profile_id, payload, profile, db)
 
 
 @router.post('/clubs/{club_id}/goalkeeper', response_model=ClubView)

@@ -3,9 +3,11 @@ from typing import Optional
 from uuid import UUID
 from pydantic import BaseModel as SCBaseModel, model_validator
 from src.models.enums import TeamPlayerRole
+from src.schemas.jersey_numbers import JerseyNumber
 
 
 class EventTeamPlayerSchema(SCBaseModel):
+    jersey_number: JerseyNumber | None = None
     id: Optional[UUID] = None
     team_id: UUID
     profile_id: Optional[UUID] = None
@@ -27,6 +29,7 @@ class EventTeamPlayerSchema(SCBaseModel):
 
 
 class EventTeamPlayerCreateSchema(SCBaseModel):
+    jersey_number: JerseyNumber | None = None
     team_id: UUID
     profile_id: Optional[UUID] = None
     guest_id: Optional[UUID] = None
@@ -50,6 +53,7 @@ class EventTeamPlayerCreateSchema(SCBaseModel):
 
 
 class EventTeamPlayerUpdateSchema(SCBaseModel):
+    jersey_number: JerseyNumber | None = None
     role: Optional[TeamPlayerRole] = None
 
     class Config:

@@ -15,11 +15,21 @@ from src.schemas.lifecycle import (
 )
 from src.controllers import lifecycle as controller
 from src.schemas.events import ConfirmationSettings
+from src.schemas.jersey_numbers import JerseyNumberRequest
 from src.routers.dependencies import current_profile, accessible_group, managed_event
 
 router = APIRouter(
     prefix="/my-groups/{group_id}/events/{event_id}", tags=["Ciclo do evento"]
 )
+
+
+@router.post("/teams/{team_id}/players/{presence_id}/jersey-number", response_model=LifecycleView)
+async def set_jersey_number(
+    team_id: UUID, presence_id: UUID, payload: JerseyNumberRequest,
+    event: PeladaEvent = Depends(managed_event),
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await controller.set_jersey_number(team_id, presence_id, payload, event, db)
 
 
 @router.post("/confirmation-settings", response_model=LifecycleView)

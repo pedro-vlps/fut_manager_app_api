@@ -205,7 +205,7 @@ async def require_entity(service, model, identifier, lock=False):
 
 async def club_view(service, club, profile):
     return ClubView(id=club.id, name=club.name, owner_id=club.owner_id,
-        members=[Person(id=p.id, name=p.name, status=m.status) for m, p in await service.members(club.id)],
+        members=[Person(id=p.id, name=p.name, status=m.status, jersey_number=m.jersey_number) for m, p in await service.members(club.id)],
         code=club.code if club.owner_id == profile.id else None, starting_goalkeeper_id=club.starting_goalkeeper_id,
         trophies=[ClubTrophy(championship_id=c.id, name=c.name, season=c.season, category="championship_champion")
                   for c in await service.club_titles(club.id)])
@@ -355,6 +355,20 @@ async def create_championship(payload, profile, db):
     return result
 
 
+async def set_club_jersey_number(club_id, profile_id, payload, profile, db):
+    service = ChampionshipsService(db)
+    club = await require_entity(service, Club, club_id, lock=True)
+    require_owner(club, profile)
+    member = await service.member(club.id, profile_id)
+    if member is None or member.status != "accepted":
+        raise HTTPException(404, "Jogador confirmado não encontrado neste time.")
+    member.jersey_number = payload.jersey_number
+    await service.flush()
+    result = await club_view(service, club, profile)
+    await service.commit()
+    return result
+
+
 async def detail(championship_id, profile, db):
     service = ChampionshipsService(db)
     championship = await require_entity(service, Championship, championship_id)
@@ -362,12 +376,13 @@ async def detail(championship_id, profile, db):
     players = await service.players(championship.id)
     matches = await service.matches(championship.id)
     owners = await service.club_owners(championship.id)
+    numbers = await service.jersey_numbers(championship.id)
     return ChampionshipDetail(**championship_view(championship, profile).model_dump(),
         entries=[EntryView(id=e.id, club_id=e.club_id, name=name, seed=e.seed,
             disqualified=e.disqualified, points_deducted=e.points_deducted, punishments=e.punishments,
             owner_id=owners[e.club_id], starting_goalkeeper_id=e.starting_goalkeeper_id,
             pool=(e.pool or chr(65 + (e.seed - 1) // (3 if championship.capacity == 12 else 4))) if championship.format == 'groups_knockout' else None,
-            players=[Person(id=p.profile_id, name=n, status="accepted") for p, n in players if p.entry_id == e.id]) for e, name in entries],
+            players=[Person(id=p.profile_id, name=n, status="accepted", jersey_number=numbers.get((e.club_id, p.profile_id))) for p, n in players if p.entry_id == e.id]) for e, name in entries],
         matches=[MatchView.model_validate(m).model_copy(update={'bracket_size':
             2 * sum(other.stage == 'knockout' and other.round == m.round for other in matches)
             if m.stage == 'knockout' else None}) for m in matches], standings=standings([e for e, _ in entries], matches),

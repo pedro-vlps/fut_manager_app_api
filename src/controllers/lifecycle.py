@@ -202,6 +202,7 @@ async def build_teams(payload: TeamsRequest, event: PeladaEvent, db: AsyncSessio
             raise HTTPException(422, "Respeite a função escolhida na confirmação de presença.")
         if any(not any(p.role == TeamPlayerRole.PLAYER for p in team.players) for team in selections):
             raise HTTPException(422, "Cada time precisa de jogadores de linha.")
+    previous_numbers = {(p.profile_id, p.guest_id): p.jersey_number for p in await service.event_players(event)}
     await service.delete_event_queue(event)
     await service.delete_event_players(event)
     await service.delete_event_teams(event)
@@ -222,8 +223,23 @@ async def build_teams(payload: TeamsRequest, event: PeladaEvent, db: AsyncSessio
                     profile_id=person.profile_id,
                     guest_id=person.guest_id,
                     role=chosen.role,
+                    jersey_number=chosen.jersey_number if "jersey_number" in chosen.model_fields_set else previous_numbers.get((person.profile_id, person.guest_id)),
                 )
             )
+    return await save(db, event)
+
+
+async def set_jersey_number(team_id, presence_id, payload, event, db):
+    service = LifecycleService(db)
+    person = await service.get(EventPresence, presence_id)
+    team = await service.get(EventTeam, team_id)
+    if person is None or person.event_id != event.id or team is None or team.event_id != event.id:
+        raise HTTPException(404, "Jogador ou time não encontrado neste evento.")
+    player = next((p for p in await service.players_for_teams([team_id])
+                   if (p.profile_id, p.guest_id) == (person.profile_id, person.guest_id)), None)
+    if player is None:
+        raise HTTPException(404, "Jogador não encontrado neste time.")
+    player.jersey_number = payload.jersey_number
     return await save(db, event)
 
 

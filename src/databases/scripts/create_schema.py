@@ -48,5 +48,5 @@ async def create_schema() -> None:
         await raw.driver_connection.execute(keeper_sql)
         groups_sql = (Path(__file__).parent / "migrations/024_championship_groups.sql").read_text(encoding="utf-8-sig")
         await raw.driver_connection.execute(groups_sql)
-        for migration in ('migrations/025_championship_feedback.sql', 'migrations/026_personal_data_encryption.sql', 'migrations/027_starting_goalkeepers.sql'):
+        for migration in ('migrations/025_championship_feedback.sql', 'migrations/026_personal_data_encryption.sql', 'migrations/027_starting_goalkeepers.sql', 'migrations/028_jersey_numbers.sql'):
             await raw.driver_connection.execute((Path(__file__).parent / migration).read_text(encoding='utf-8-sig'))

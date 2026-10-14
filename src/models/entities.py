@@ -371,6 +371,7 @@ class EventTeam(UUIDTimestampMixin, Base):
 class EventTeamPlayer(UUIDTimestampMixin, Base):
     __tablename__ = "event_team_players"
     __table_args__ = (
+        CheckConstraint("jersey_number BETWEEN 0 AND 100", name="jersey_number_range"),
         UniqueConstraint("team_id", "profile_id", name="uq_event_team_player_profile"),
         UniqueConstraint("team_id", "guest_id", name="uq_event_team_player_guest"),
         CheckConstraint(
@@ -392,6 +393,7 @@ class EventTeamPlayer(UUIDTimestampMixin, Base):
         default=TeamPlayerRole.PLAYER,
         nullable=False,
     )
+    jersey_number: Mapped[Optional[int]] = mapped_column(Integer)
 
     team: Mapped[EventTeam] = relationship(back_populates="players")
     profile: Mapped[Profile] = relationship(back_populates="team_assignments")

@@ -598,3 +598,25 @@ a API atualizada. Ela amplia a restrição de capacidade e adiciona a coluna
 opcional de grupo, preservando os dados. Com `FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP=true`,
 o bootstrap aplica a migração automaticamente. O arquivo `create_database.sql`
 atualizado é somente para bancos novos.
+
+## Números das camisas
+
+O número da camisa é opcional e aceita apenas inteiros de 0 a 100, inclusive.
+Envie `jersey_number: null` para remover o número. Jogadores existentes permanecem
+sem número até o cadastro pelo administrador.
+
+O dono do time permanente pode editar jogadores confirmados usando
+`POST /clubs/{club_id}/members/{profile_id}/jersey-number`. O número cadastrado
+aparece também no elenco inscrito e na seleção de lances dos campeonatos.
+Ele pertence ao jogador naquele time e pode ser atualizado sem alterar o elenco.
+
+Nos eventos de grupo, administradores e donos usam
+`POST /my-groups/{group_id}/events/{event_id}/teams/{team_id}/players/{presence_id}/jersey-number`.
+O número acompanha o jogador nas trocas e nos novos sorteios dentro do evento,
+inclusive convidados e substitutos temporários. Eventos encerrados não permitem edição.
+
+Para bancos existentes, aplique `src/databases/scripts/migrations/028_jersey_numbers.sql`
+antes de iniciar a API atualizada. A migração adiciona colunas opcionais e restrições
+de intervalo, sem modificar os elencos. Com `FUT_MANAGER_CREATE_SCHEMA_ON_STARTUP=true`,
+o bootstrap aplica a migração automaticamente. O `create_database.sql` foi regenerado
+para instalações novas.

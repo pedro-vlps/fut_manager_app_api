@@ -74,6 +74,12 @@ class ChampionshipsService(DatabaseService):
         return (await self.db.execute(select(ClubMember, Profile).join(Profile, Profile.id == ClubMember.profile_id)
             .where(ClubMember.club_id == club_id).order_by(Profile.name, Profile.id))).all()
 
+    async def jersey_numbers(self, championship_id):
+        rows = await self.db.execute(select(ClubMember.club_id, ClubMember.profile_id, ClubMember.jersey_number)
+            .join(ChampionshipEntry, ChampionshipEntry.club_id == ClubMember.club_id)
+            .where(ChampionshipEntry.championship_id == championship_id))
+        return {(club_id, profile_id): number for club_id, profile_id, number in rows}
+
     async def member(self, club_id, profile_id):
         return await self.db.scalar(select(ClubMember).where(ClubMember.club_id == club_id, ClubMember.profile_id == profile_id))
 

@@ -19,10 +19,12 @@ class Club(UUIDTimestampMixin, Base):
 class ClubMember(UUIDTimestampMixin, Base):
     __tablename__ = "club_members"
     __table_args__ = (UniqueConstraint("club_id", "profile_id"),
+                     CheckConstraint("jersey_number BETWEEN 0 AND 100", name="jersey_number_range"),
                      CheckConstraint("status IN ('pending', 'accepted', 'declined', 'requested')", name="club_member_status"))
     club_id: Mapped[UUID] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"))
     profile_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"))
     status: Mapped[str] = mapped_column(String(16), default="pending")
+    jersey_number: Mapped[int | None] = mapped_column(Integer)
 
 
 class Championship(UUIDTimestampMixin, Base):
