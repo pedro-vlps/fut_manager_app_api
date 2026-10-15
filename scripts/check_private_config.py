@@ -20,7 +20,7 @@ PUBLIC_HOSTS = {
     'docs.expo.dev', 'expo.dev', 'www.npmjs.com', 'registry.npmjs.org',
     'github.com', 'docs.github.com', 'chat.expo.dev', 'reactnative.dev',
     'www.w3.org', 'nativewind.dev', 'www.nativewind.dev', 'tamagui.dev',
-    'reactnativeunistyles.vercel.app', 'railway.com', 'www.santosfc.com.br',
+    'reactnativeunistyles.vercel.app', 'railway.com', 'docs.railway.com', 'www.santosfc.com.br',
     'cdn.conmebol.com', 'www.cbf7.com.br', 'files.pythonhosted.org',
     'eslint.org', 'feross.org', 'opencollective.com', 'paypal.me',
     'tidelift.com', 'www.patreon.com',
