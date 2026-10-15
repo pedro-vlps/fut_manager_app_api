@@ -1,7 +1,5 @@
 # Fut Manager · API
 
-**English** | [Português (Brasil)](README.pt-BR.md) | [Development guide](https://github.com/pedro-vlps/fut_manager_app_api?tab=contributing-ov-file)
-
 Fut Manager is a personal project for organizing amateur football, from confirming attendance at a pickup game to winning a tournament. The API manages competition rules, results, and the history of players and teams.
 
 The project grew out of a practical need to organize matches and has already been tested in a real tournament. It is evolving toward an MVP, with improvements guided by its use on the pitch.
