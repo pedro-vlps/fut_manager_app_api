@@ -108,7 +108,4 @@ With **Wait for CI enabled**, Railway waits for the commit's GitHub Actions work
 
 The companion app is in the **[fut_manager_app_mobile](https://github.com/pedro-vlps/fut_manager_app_mobile)** repository and uses Expo, React Native, and TypeScript, with web/PWA distribution and support for native builds.
 
-- [Changes following tournament testing (Portuguese)](Feedback.md)
-- [Previous technical documentation (Portuguese)](docs/DEVELOPMENT.md)
-
 Developed by **Pedro Vieira** as a personal portfolio project.
