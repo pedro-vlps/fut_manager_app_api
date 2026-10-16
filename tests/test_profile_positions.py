@@ -95,7 +95,7 @@ class ProfilePositionTests(AuthTestCase):
         self.assertNotIn('positions', ProfileUpdateSchema(name='Outro nome').model_dump(exclude_unset=True))
 
     async def test_generic_profile_crud_requires_positions(self):
-        from api_crud_generate_libary.routers.router import Router
+        from api_crud_generate_libary import Router
         from src.models import CRUD_MODELS
         options = CRUD_MODELS[0]
         self.app.include_router(Router(**{k:v for k,v in options.items() if k not in {'prefix','tags'}}).router, prefix='/profiles')

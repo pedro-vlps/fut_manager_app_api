@@ -18,6 +18,13 @@ Developed by **[Pedro Vieira](https://github.com/pedro-vlps)** as an end-to-end 
 
 The API also uses my **[api_crud_generate_libary](https://github.com/pedro-vlps/api_crud_generate_libary)** dependency for shared CRUD infrastructure. Project-specific permissions and competition rules remain in this repository.
 
+The dependency tracks the library's `develop` branch; `poetry.lock` pins version
+**1.2.0** to a specific commit for reproducible installations. Generated CRUD
+routes accept one object per POST and preserve omitted fields in PATCH requests.
+Listings require `page` and `items_per_page` together when paginated, and matching
+`order_by` and `direction` values when sorted. Responses keep the `data` envelope;
+paginated listings also return `total_count` and `has_more`.
+
 **Current tradeoffs:** this is an MVP under active development. Authentication sessions are held in process memory, so restarts invalidate sessions and multiple workers would need a shared session store. Versioned migration scripts require explicit ordering; schema creation at startup is intended for new installations. These are concrete next steps for operating at a larger scale.
 
 ## Features

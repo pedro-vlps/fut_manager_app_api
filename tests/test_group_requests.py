@@ -1,7 +1,7 @@
 import unittest
 from uuid import uuid4
 from fastapi import Depends
-from api_crud_generate_libary.routers.router import Router
+from api_crud_generate_libary import Router
 from src.models import CRUD_MODELS
 from src.models.entities import GroupMember, PeladaGroup, Profile
 from src.models.enums import GroupRole, MembershipStatus

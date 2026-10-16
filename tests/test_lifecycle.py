@@ -260,7 +260,7 @@ class LifecycleTests(LifecycleFixture):
             await self.post(path,body,status=409)
         # Mesmo chamando as rotas CRUD diretamente, não pode reabrir nem acrescentar dados.
         from fastapi import Depends
-        from api_crud_generate_libary.routers.router import Router
+        from api_crud_generate_libary import Router
         from src.models import CRUD_MODELS
         from src.routers.event_write_guard import event_write_guard
         for options in CRUD_MODELS:

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api_crud_generate_libary.routers.router import Router
+from api_crud_generate_libary import Router
 
 from src.configs.settings import settings
 from src.configs.db_connection import engine
